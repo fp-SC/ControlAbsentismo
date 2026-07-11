@@ -1,6 +1,6 @@
-<!-
-Versión 4.0.0 - 2024-07-11
-Implementación de seguridad con acceso restringido solo para cuentas institucionales del centro educativo que pertenezcan a profesorado con admin fijos y lista de docentes autorizados.
+<!--
+Versión 3.0.0 - 2024-07-10
+Implementación de seguridad con acceso restringido solo para cuentas institucionales del centro educativo que pertenezcan a profesorado.
 -->
 <!DOCTYPE html>
 <html lang="es">
@@ -969,8 +969,17 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             getStoredIdToken() {
                 return localStorage.getItem('sc_id_token') || '';
             },
+            getFromLocalStorage(key, fallback = null) {
+                const raw = localStorage.getItem(key);
+                if (raw === null || raw === undefined) return fallback;
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    return raw;
+                }
+            },
             normalizeEmail(value) {
-                return (value || '').toString().trim().toLowerCase();
+                return (value || '').toString().trim().replace(/^"|"$/g, '').toLowerCase();
             },
             isInstitutionalEmail(email) {
                 return this.normalizeEmail(email).endsWith(`@${this.institutionalDomain}`);
@@ -1546,7 +1555,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     this.savedSchedules = data.schedules || [];
                     this.noticeStates = data.noticeStates || {};
                     this.actionLog = data.actionLog || [];
-                    this.currentUserEmail = data.currentUserEmail || localStorage.getItem('local_current_user') || '';
+                    this.currentUserEmail = data.currentUserEmail || this.getFromLocalStorage('local_current_user', '') || '';
                     this.accessControl = {
                         allowedEmails: Array.isArray(data.accessControl?.allowedEmails) ? data.accessControl.allowedEmails : [],
                         adminEmails: Array.isArray(data.accessControl?.adminEmails) ? data.accessControl.adminEmails : ['cpastorpaz@sagrado-corazon.es', 'fp@sagrado-corazon.es']
@@ -1629,21 +1638,21 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
 
             loadFromLocalStorage() {
                 try {
-                    const cals = localStorage.getItem('local_calendars');
-                    if (cals) this.savedCalendars = JSON.parse(cals);
-                    const scheds = localStorage.getItem('local_schedules');
-                    if (scheds) this.savedSchedules = JSON.parse(scheds);
-                    const sets = localStorage.getItem('local_settings');
-                    if (sets) this.settings = { ...this.settings, ...JSON.parse(sets) };
-                    const notices = localStorage.getItem('local_notice_states');
-                    if (notices) this.noticeStates = JSON.parse(notices);
+                    const cals = this.getFromLocalStorage('local_calendars');
+                    if (cals) this.savedCalendars = cals;
+                    const scheds = this.getFromLocalStorage('local_schedules');
+                    if (scheds) this.savedSchedules = scheds;
+                    const sets = this.getFromLocalStorage('local_settings');
+                    if (sets) this.settings = { ...this.settings, ...sets };
+                    const notices = this.getFromLocalStorage('local_notice_states');
+                    if (notices) this.noticeStates = notices;
                     this.migrateLegacyNoticeStates();
-                    const logs = localStorage.getItem('local_action_log');
-                    if (logs) this.actionLog = JSON.parse(logs);
-                    const user = localStorage.getItem('local_current_user');
+                    const logs = this.getFromLocalStorage('local_action_log');
+                    if (logs) this.actionLog = logs;
+                    const user = this.getFromLocalStorage('local_current_user');
                     if (user) this.currentUserEmail = user;
-                    const access = localStorage.getItem('local_access_control');
-                    if (access) this.accessControl = JSON.parse(access);
+                    const access = this.getFromLocalStorage('local_access_control');
+                    if (access) this.accessControl = access;
                     this.updateAdminRoleFromAccessControl();
 
                     if (this.savedCalendars.length > 0 && !this.selectedCalendarId) {
