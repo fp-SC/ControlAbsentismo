@@ -112,8 +112,8 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 </button>
                 <!-- Botón Modo Administrador (Estilo Azul/Violeta Corporativo) -->
                 <button type="button" @click="toggleAdmin" :class="isAdmin ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-500/35' : 'bg-slate-800/60 text-slate-300 border-slate-700 hover:bg-slate-700/80'" class="px-4 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-2 transition duration-200 shadow-lg">
-                    <i :class="isAdmin ? 'ph ph-lock-open text-base text-indigo-400' : 'ph ph-lock-key text-base text-slate-400'"></i>
-                    {{ isAdmin ? 'Salir Admin' : 'Modo Admin' }}
+                    <i :class="isAdmin ? 'ph ph-shield-check text-base text-indigo-400' : 'ph ph-user text-base text-slate-400'"></i>
+                    {{ isAdmin ? 'Perfil Admin' : 'Perfil Profesor' }}
                 </button>
                 <!-- Piloto de Sincronización (Rojo/Verde Corporativo) -->
                 <div class="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/20 text-xs font-extrabold bg-emerald-500/5 text-emerald-400 shadow-md">
@@ -141,7 +141,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 <i class="ph ph-wrench text-indigo-400 text-2xl flex-shrink-0"></i>
                 <div class="text-sm">
                     <p class="font-bold text-base text-indigo-300">Modo Administrador Activado</p>
-                    <p class="mt-0.5 text-slate-300">Puedes configurar los días festivos haciendo clic sobre el calendario continuo, ajustar los límites máximos y definir los porcentajes de pre-aviso para los alumnos.</p>
+                    <p class="mt-0.5 text-slate-300">Tu cuenta tiene rol administrador validado por servidor. Puedes gestionar festivos, límites y la lista de correos permitidos.</p>
                 </div>
             </div>
 
@@ -314,8 +314,52 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     <ul class="mt-3 text-sm text-slate-400 space-y-1 list-disc pl-5">
                         <li>Configurar calendario, festivos y límites de alertas.</li>
                         <li>Crear o editar cuadrantes de horas compartidos.</li>
+                        <li>Gestionar correos con acceso permitido a la aplicación.</li>
                         <li>Consultar, filtrar y exportar el log de acciones.</li>
                     </ul>
+
+                    <div class="mt-5 border-t border-slate-800 pt-4 space-y-3">
+                        <h3 class="text-sm font-bold text-white">Acceso por correo (allowlist)</h3>
+                        <p class="text-xs text-slate-400">Solo administradores pueden editar esta lista. Los administradores fijos siempre mantienen acceso.</p>
+
+                        <div>
+                            <p class="text-[11px] font-semibold text-slate-400 mb-1">Administradores fijos</p>
+                            <div class="flex flex-wrap gap-2">
+                                <span v-for="email in accessControl.adminEmails" :key="email" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-200">
+                                    {{ email }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p class="text-[11px] font-semibold text-slate-400 mb-1">Profesores permitidos</p>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input
+                                    type="email"
+                                    v-model="newAllowedEmail"
+                                    placeholder="correo@sagrado-corazon.es"
+                                    class="flex-1 px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                                >
+                                <button type="button" @click="addAllowedEmail" class="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition">
+                                    Agregar correo
+                                </button>
+                                <button type="button" @click="saveAllowedEmails" class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition">
+                                    Guardar lista
+                                </button>
+                            </div>
+                            <div v-if="accessControl.allowedEmails.length === 0" class="mt-2 text-[11px] text-slate-500">
+                                No hay correos permitidos todavía.
+                            </div>
+                            <div v-else class="mt-2 flex flex-wrap gap-2">
+                                <span v-for="email in accessControl.allowedEmails" :key="email" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#040914] border border-slate-700 text-slate-200">
+                                    {{ email }}
+                                    <button type="button" @click="removeAllowedEmail(email)" class="text-red-300 hover:text-red-200" title="Quitar correo">
+                                        <i class="ph ph-x"></i>
+                                    </button>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
 
                     <div class="mt-5 border-t border-slate-800 pt-4">
                         <h3 class="text-sm font-bold text-white mb-1.5">Importar informe para crear/editar cuadrantes</h3>
@@ -712,7 +756,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
     // =========================================================================
     // ⚙️ CONFIGURACIÓN AUTOMÁTICA DE GOOGLE DRIVE ⚙️
     // =========================================================================
-    const URL_DEL_SCRIPT = "https://script.google.com/macros/s/AKfycbynT-jNI7Y2b_W52WXccbZ-Zg07Uvzh5EuFX0PpyZSHwP66wW3igO1bIvktmQk-4d4pCQ/exec";
+    const URL_DEL_SCRIPT = "https://script.google.com/macros/s/AKfycbyuCibhfR0ZkpurMRCKx5HYxm8uHo2ksN7Z9_3Ox8kWu2RStyxt5TSTg2ruoSWRQW4O9w/exec";
     // =========================================================================
 
     const { createApp } = Vue;
@@ -750,6 +794,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 authError: '',
                 institutionalDomain: 'sagrado-corazon.es',
                 googleClientId: '523053820797-pgh6mp7hagllp1cdhul8l5j2lulb78g2.apps.googleusercontent.com',
+                accessControl: {
+                    allowedEmails: [],
+                    adminEmails: ['cpastorpaz@sagrado-corazon.es', 'fp@sagrado-corazon.es']
+                },
+                newAllowedEmail: '',
                 noticeStates: {},
                 actionLog: [],
                 logFilters: {
@@ -916,6 +965,27 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
 
                 return { valid: true, email };
             },
+            getStoredIdToken() {
+                return localStorage.getItem('sc_id_token') || '';
+            },
+            normalizeEmail(value) {
+                return (value || '').toString().trim().toLowerCase();
+            },
+            isInstitutionalEmail(email) {
+                return this.normalizeEmail(email).endsWith(`@${this.institutionalDomain}`);
+            },
+            updateAdminRoleFromAccessControl() {
+                const email = this.normalizeEmail(this.currentUserEmail);
+                const admins = Array.isArray(this.accessControl.adminEmails) ? this.accessControl.adminEmails.map(this.normalizeEmail) : [];
+                this.isAdmin = admins.includes(email);
+            },
+            mapServerAuthError(errorCode) {
+                if (errorCode === 'EMAIL_NOT_ALLOWED') return 'Tu cuenta no tiene permiso para usar esta aplicación. Contacta con administración.';
+                if (errorCode === 'TOKEN_REQUIRED') return 'Sesión caducada. Inicia sesión de nuevo.';
+                if (errorCode === 'INVALID_TOKEN' || errorCode === 'UNVERIFIED_EMAIL') return 'No se pudo validar tu identidad. Vuelve a iniciar sesión.';
+                if (errorCode === 'INVALID_DOMAIN' || errorCode === 'INVALID_HOSTED_DOMAIN') return `Acceso denegado. Usa una cuenta @${this.institutionalDomain}.`;
+                return 'No se pudo validar el acceso en servidor.';
+            },
             handleGoogleCredentialResponse(response) {
                 const credential = response && response.credential ? response.credential : '';
                 const check = this.validateInstitutionalCredential(credential);
@@ -937,6 +1007,12 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
 
                 if (previous !== this.currentUserEmail) {
                     this.pushActionLog('Inicio de sesión de usuario', `Usuario activo: ${this.currentUserEmail}`);
+                }
+
+                if (this.isUrlConfigured) {
+                    this.loadFromGoogleDrive();
+                } else {
+                    this.loadFromLocalStorage();
                 }
             },
             renderGoogleLoginButton() {
@@ -990,6 +1066,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 this.isAuthenticated = false;
                 this.currentUserEmail = '';
                 this.isAdmin = false;
+                this.accessControl = {
+                    allowedEmails: [],
+                    adminEmails: ['cpastorpaz@sagrado-corazon.es', 'fp@sagrado-corazon.es']
+                };
+                this.newAllowedEmail = '';
                 this.step = 1;
                 this.authError = '';
                 localStorage.removeItem('sc_id_token');
@@ -1310,29 +1391,55 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
 
             toggleAdmin() {
                 if (this.isAdmin) {
-                    this.isAdmin = false;
-                    this.pushActionLog('Modo admin desactivado', 'El usuario salió del modo administrador.');
+                    this.showWarning('Tu cuenta ya tiene permisos de administrador validados por servidor.');
                 } else {
-                    this.openModal({
-                        title: 'Acceso de Administración',
-                        message: 'Introduce el PIN de administrador para modificar los límites y los calendarios festivos.',
-                        needsInput: true,
-                        inputType: 'password',
-                        icon: 'ph ph-lock-key',
-                        confirmText: 'Desbloquear',
-                        confirmClass: 'bg-indigo-600 hover:bg-indigo-700 text-white',
-                        onConfirm: (pin) => {
-                            if (pin === '1234') { 
-                                this.isAdmin = true;
-                                this.step = 1;
-                                this.pushActionLog('Modo admin activado', 'Acceso al modo administrador con PIN válido.');
-                            } else {
-                                this.showWarning("PIN incorrecto. Acceso denegado.");
-                                this.pushActionLog('Intento admin fallido', 'PIN incorrecto para acceso administrador.');
-                            }
-                        }
-                    });
+                    this.showWarning('Tu cuenta no tiene rol administrador. Solicita el alta al equipo admin.');
                 }
+            },
+
+            addAllowedEmail() {
+                if (!this.isAdmin) {
+                    this.showWarning('Solo administradores pueden editar la lista de acceso.');
+                    return;
+                }
+                const email = this.normalizeEmail(this.newAllowedEmail);
+                if (!email) {
+                    this.showWarning('Escribe un correo antes de agregarlo.');
+                    return;
+                }
+                if (!this.isInstitutionalEmail(email)) {
+                    this.showWarning(`Solo se permiten correos @${this.institutionalDomain}.`);
+                    return;
+                }
+                const admins = this.accessControl.adminEmails.map(this.normalizeEmail);
+                if (admins.includes(email)) {
+                    this.showWarning('Ese correo ya es administrador fijo y no necesita estar en la lista de profesorado.');
+                    return;
+                }
+                if (!this.accessControl.allowedEmails.includes(email)) {
+                    this.accessControl.allowedEmails.push(email);
+                    this.accessControl.allowedEmails.sort((a, b) => a.localeCompare(b));
+                    this.pushActionLog('Alta en allowlist', `Correo agregado: ${email}`);
+                }
+                this.newAllowedEmail = '';
+            },
+
+            removeAllowedEmail(email) {
+                if (!this.isAdmin) {
+                    this.showWarning('Solo administradores pueden editar la lista de acceso.');
+                    return;
+                }
+                this.accessControl.allowedEmails = this.accessControl.allowedEmails.filter(item => item !== email);
+                this.pushActionLog('Baja en allowlist', `Correo eliminado: ${email}`);
+            },
+
+            saveAllowedEmails() {
+                if (!this.isAdmin) {
+                    this.showWarning('Solo administradores pueden guardar la lista de acceso.');
+                    return;
+                }
+                this.syncToDrive();
+                this.showWarning('Lista de correos permitidos guardada correctamente.');
             },
 
             selectAllToggle() {
@@ -1419,13 +1526,31 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             async loadFromGoogleDrive() {
                 this.isSyncing = true;
                 try {
-                    const response = await fetch(this.driveUrl);
+                    const idToken = this.getStoredIdToken();
+                    if (!idToken) {
+                        this.logoutInstitutionalSession();
+                        this.authError = 'Sesión caducada. Inicia sesión de nuevo.';
+                        return;
+                    }
+
+                    const requestUrl = `${this.driveUrl}?idToken=${encodeURIComponent(idToken)}&t=${Date.now()}`;
+                    const response = await fetch(requestUrl);
                     const data = await response.json();
+
+                    if (!data.success) {
+                        throw new Error(data.error || 'UNAUTHORIZED');
+                    }
+
                     this.savedCalendars = data.calendars || [];
                     this.savedSchedules = data.schedules || [];
                     this.noticeStates = data.noticeStates || {};
                     this.actionLog = data.actionLog || [];
                     this.currentUserEmail = data.currentUserEmail || localStorage.getItem('local_current_user') || '';
+                    this.accessControl = {
+                        allowedEmails: Array.isArray(data.accessControl?.allowedEmails) ? data.accessControl.allowedEmails : [],
+                        adminEmails: Array.isArray(data.accessControl?.adminEmails) ? data.accessControl.adminEmails : ['cpastorpaz@sagrado-corazon.es', 'fp@sagrado-corazon.es']
+                    };
+                    this.updateAdminRoleFromAccessControl();
                     this.migrateLegacyNoticeStates();
                     if (data.settings) {
                         this.settings = { ...this.settings, ...data.settings };
@@ -1437,6 +1562,13 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     }
                 } catch (e) {
                     console.error("Error leyendo de Drive:", e);
+                    const serverError = (e && e.message) ? e.message : '';
+                    const authErrors = ['EMAIL_NOT_ALLOWED', 'TOKEN_REQUIRED', 'INVALID_TOKEN', 'UNVERIFIED_EMAIL', 'INVALID_DOMAIN', 'INVALID_HOSTED_DOMAIN'];
+                    if (authErrors.includes(serverError)) {
+                        this.logoutInstitutionalSession();
+                        this.authError = this.mapServerAuthError(serverError);
+                        return;
+                    }
                     this.loadFromLocalStorage();
                 } finally {
                     this.persistNoticeAndLogLocal();
@@ -1452,6 +1584,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     this.saveToLocalStorage('local_notice_states', this.noticeStates);
                     this.saveToLocalStorage('local_action_log', this.actionLog);
                     this.saveToLocalStorage('local_current_user', this.currentUserEmail);
+                    this.saveToLocalStorage('local_access_control', this.accessControl);
                     return;
                 }
                 
@@ -1463,19 +1596,31 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         settings: this.settings,
                         noticeStates: this.noticeStates,
                         actionLog: this.actionLog,
-                        currentUserEmail: this.currentUserEmail
+                        currentUserEmail: this.currentUserEmail,
+                        accessControl: this.accessControl,
+                        idToken: this.getStoredIdToken()
                     };
                     
-                    await fetch(this.driveUrl, {
+                    const response = await fetch(this.driveUrl, {
                         method: 'POST',
-                        mode: 'no-cors', 
+                        mode: 'cors',
                         headers: {
                             'Content-Type': 'text/plain;charset=utf-8'
                         },
                         body: JSON.stringify(payload)
                     });
+
+                    const data = await response.json();
+                    if (!data.success) {
+                        throw new Error(data.error || 'WRITE_FAILED');
+                    }
                 } catch(e) {
                     console.error("Error enviando a Drive:", e);
+                    const code = (e && e.message) ? e.message : '';
+                    if (code === 'EMAIL_NOT_ALLOWED' || code === 'TOKEN_REQUIRED' || code === 'INVALID_TOKEN' || code === 'INVALID_DOMAIN' || code === 'INVALID_HOSTED_DOMAIN') {
+                        this.logoutInstitutionalSession();
+                        this.authError = this.mapServerAuthError(code);
+                    }
                 } finally {
                     this.isSyncing = false;
                 }
@@ -1496,6 +1641,9 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     if (logs) this.actionLog = JSON.parse(logs);
                     const user = localStorage.getItem('local_current_user');
                     if (user) this.currentUserEmail = user;
+                    const access = localStorage.getItem('local_access_control');
+                    if (access) this.accessControl = JSON.parse(access);
+                    this.updateAdminRoleFromAccessControl();
 
                     if (this.savedCalendars.length > 0 && !this.selectedCalendarId) {
                         this.selectedCalendarId = this.settings.defaultCalendarId || this.savedCalendars[0].id;
