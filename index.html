@@ -1567,6 +1567,46 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             // Se ha eliminado el guardado de festivos por defecto para que el calendario se configure manualmente.
 
             // --- SINCRONIZACIÓN AUTOMÁTICA CON GOOGLE DRIVE ---
+            async readDriveSnapshot(idToken) {
+                const postResponse = await fetch(this.driveUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: {
+                        'Content-Type': 'text/plain;charset=utf-8'
+                    },
+                    body: JSON.stringify({
+                        action: 'read',
+                        idToken,
+                        t: Date.now()
+                    })
+                });
+
+                const postData = await postResponse.json();
+                const hasSnapshot = postData
+                    && postData.success
+                    && Array.isArray(postData.calendars)
+                    && Array.isArray(postData.schedules);
+
+                if (hasSnapshot) {
+                    return postData;
+                }
+
+                const url = new URL(this.driveUrl);
+                url.searchParams.set('idToken', idToken);
+                url.searchParams.set('t', Date.now().toString());
+
+                const getResponse = await fetch(url.toString(), {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                const getData = await getResponse.json();
+
+                if (!getData.success) {
+                    throw new Error(getData.error || 'READ_FAILED');
+                }
+
+                return getData;
+            },
             async loadFromGoogleDrive() {
                 this.isHydratingRemoteData = true;
                 this.isSyncing = true;
@@ -1578,19 +1618,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         return;
                     }
 
-                    const response = await fetch(this.driveUrl, {
-                        method: 'POST',
-                        mode: 'cors',
-                        headers: {
-                            'Content-Type': 'text/plain;charset=utf-8'
-                        },
-                        body: JSON.stringify({
-                            action: 'read',
-                            idToken,
-                            t: Date.now()
-                        })
-                    });
-                    const data = await response.json();
+                    const data = await this.readDriveSnapshot(idToken);
 
                     if (!data.success) {
                         throw new Error(data.error || 'UNAUTHORIZED');
