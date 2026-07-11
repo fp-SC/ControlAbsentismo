@@ -1,0 +1,2182 @@
+*/
+Versión 3.0.0 - 2024-07-10
+Implementación de seguridad con acceso restringido solo para cuentas institucionales del centro educativo que pertenezcan a profesorado.
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Faltas - Sagrado Corazón A.P.P.</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- SheetJS para leer Excel/CSV -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <!-- jsPDF para generar PDFs de absentismo -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- JSZip para empaquetar PDFs en ZIP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.0/jszip.min.js"></script>
+    
+    <!-- Iconos Phosphor -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <style>
+        [v-cloak] { display: none; }
+        body { 
+            font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+            background-color: #03060f; 
+        }
+        .spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        /* Efectos de brillo ambiental corporativo de fondo */
+        .bg-glow-red {
+            filter: blur(140px);
+            background: radial-gradient(circle, rgba(223, 26, 26, 0.15) 0%, rgba(0,0,0,0) 70%);
+        }
+        .bg-glow-blue {
+            filter: blur(140px);
+            background: radial-gradient(circle, rgba(2, 84, 199, 0.15) 0%, rgba(0,0,0,0) 70%);
+        }
+        .bg-glow-gold {
+            filter: blur(140px);
+            background: radial-gradient(circle, rgba(234, 179, 8, 0.08) 0%, rgba(0,0,0,0) 70%);
+        }
+
+        /* Degradado de borde corporativo del Sagrado Corazón */
+        .sc-border-gradient {
+            border-image: linear-gradient(to right, #0254c7, #df1a1a, #eab308) 1;
+        }
+    </style>
+</head>
+<body class="text-slate-100 antialiased p-3 md:p-6 bg-[#03060f] min-h-screen relative overflow-x-hidden">
+
+    <!-- Capas de brillo ambiental para un diseño moderno de aplicación -->
+    <div class="absolute top-10 left-10 w-[350px] h-[350px] bg-glow-blue pointer-events-none -z-10"></div>
+    <div class="absolute bottom-10 right-10 w-[400px] h-[400px] bg-glow-red pointer-events-none -z-10"></div>
+    <div class="absolute top-1/2 left-1/3 w-[300px] h-[300px] bg-glow-gold pointer-events-none -z-10"></div>
+
+<div id="app" v-cloak class="max-w-6xl mx-auto min-h-screen flex flex-col justify-between relative z-10">
+    <div v-if="!isAuthenticated" class="fixed inset-0 z-[90] bg-[#03060f]/95 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-xl bg-[#070e1e] border border-slate-800 rounded-2xl shadow-2xl p-6 md:p-8 text-center">
+            <h2 class="text-2xl font-black text-white mb-2">Acceso Restringido</h2>
+            <p class="text-slate-300 text-sm mb-2">Debes iniciar sesión con tu cuenta institucional para utilizar la aplicación.</p>
+            <p class="text-sky-300 text-sm font-bold mb-6">Solo se permite el dominio @sagrado-corazon.es</p>
+
+            <div ref="googleLoginBtn" class="flex justify-center"></div>
+
+            <p v-if="authError" class="mt-5 text-red-300 text-sm bg-red-950/30 border border-red-800/40 rounded-lg p-3">
+                {{ authError }}
+            </p>
+        </div>
+    </div>
+    
+    <div :class="!isAuthenticated ? 'pointer-events-none select-none blur-[2px]' : ''">
+        <!-- Header con el Logotipo en Fondo Oscuro y Botón Admin -->
+        <header class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#070e1e]/90 p-5 rounded-2xl border border-slate-800/80 shadow-2xl backdrop-blur-md">
+            <div class="flex items-center gap-4">
+                <!-- Contenedor del Logo con fondo oscuro idóneo para letras blancas -->
+                <div class="relative w-16 h-16 flex-shrink-0 bg-[#040914] rounded-xl overflow-hidden flex items-center justify-center border border-slate-700 shadow-inner">
+                    <img src="https://lh3.googleusercontent.com/u/0/d/1Y7DoPThxj9v0KH3ttMdoBh2cWKfgPe8Z" alt="Logo Sagrado Corazón" class="w-full h-full object-contain p-1" @error="handleLogoError" v-if="!logoFailed">
+                    <div v-else class="w-full h-full bg-blue-600 text-white flex items-center justify-center p-2">
+                        <i class="ph ph-student text-3xl"></i>
+                    </div>
+                </div>
+                <div>
+                    <!-- Nombre del centro con acento en colores corporativos -->
+                    <h1 class="text-xl md:text-2xl font-black text-white tracking-tight flex flex-wrap items-center gap-x-2">
+                        <span>Centro Educativo</span>
+                        <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-red-400 to-yellow-400">Sagrado Corazón</span>
+                        <span class="text-white">A.P.P.</span>
+                    </h1>
+                    <p class="text-xs text-slate-400 font-semibold tracking-wide">Plataforma Profesional de Asistencia y Gestión de Faltas</p>
+                </div>
+            </div>
+            
+            <!-- Estado de Conexión y Modo Admin -->
+            <div class="flex items-center gap-3 self-start md:self-auto">
+                <div class="hidden lg:flex items-center gap-2 px-3 py-2 rounded-xl border border-sky-500/25 text-xs font-bold bg-sky-500/10 text-sky-200 shadow-md max-w-[300px]">
+                    <i class="ph ph-user-circle text-base text-sky-300"></i>
+                    <span class="truncate" :title="currentUserEmail || 'Usuario sin identificar'">{{ currentUserEmail || 'Usuario sin identificar' }}</span>
+                </div>
+                <button type="button" @click="logoutInstitutionalSession" class="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-700/80 text-xs font-bold transition shadow-lg flex items-center gap-1.5">
+                    <i class="ph ph-sign-out"></i>
+                    Cerrar sesión
+                </button>
+                <!-- Botón Modo Administrador (Estilo Azul/Violeta Corporativo) -->
+                <button type="button" @click="toggleAdmin" :class="isAdmin ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-500/35' : 'bg-slate-800/60 text-slate-300 border-slate-700 hover:bg-slate-700/80'" class="px-4 py-2 rounded-xl border text-xs font-extrabold flex items-center gap-2 transition duration-200 shadow-lg">
+                    <i :class="isAdmin ? 'ph ph-lock-open text-base text-indigo-400' : 'ph ph-lock-key text-base text-slate-400'"></i>
+                    {{ isAdmin ? 'Salir Admin' : 'Modo Admin' }}
+                </button>
+                <!-- Piloto de Sincronización (Rojo/Verde Corporativo) -->
+                <div class="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/20 text-xs font-extrabold bg-emerald-500/5 text-emerald-400 shadow-md">
+                    <i v-if="isSyncing" class="ph ph-spinner spinner text-emerald-400 text-lg"></i>
+                    <i v-else class="ph ph-cloud-check text-emerald-400 text-lg"></i>
+                    <span class="hidden sm:inline">{{ isSyncing ? 'Sincronizando...' : 'Sincronizado' }}</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Aviso si falta la URL del Script -->
+        <div v-if="!isUrlConfigured" class="bg-red-950/40 border-2 border-red-800/80 p-4 rounded-xl flex items-start gap-3 mb-6 shadow-2xl text-red-200 backdrop-blur-md">
+            <i class="ph ph-warning-octagon text-red-500 text-3xl flex-shrink-0"></i>
+            <div class="text-sm">
+                <p class="font-black text-lg text-red-400">¡Falta configurar el Script de Drive!</p>
+                <p class="mt-1 font-medium text-slate-300">Busca en la línea 403 del código HTML la variable <code>URL_DEL_SCRIPT</code> y pega ahí tu enlace de Google Apps Script.</p>
+            </div>
+        </div>
+
+        <!-- STEP 1: Configuración de Faltas -->
+        <div v-if="step === 1" class="space-y-6">
+
+            <!-- Banner Informativo del Administrador -->
+            <div v-if="isAdmin" class="bg-indigo-950/30 border border-indigo-500/30 p-4 rounded-xl flex items-start gap-3 animate-fade-in shadow-xl text-indigo-200 backdrop-blur-sm">
+                <i class="ph ph-wrench text-indigo-400 text-2xl flex-shrink-0"></i>
+                <div class="text-sm">
+                    <p class="font-bold text-base text-indigo-300">Modo Administrador Activado</p>
+                    <p class="mt-0.5 text-slate-300">Puedes configurar los días festivos haciendo clic sobre el calendario continuo, ajustar los límites máximos y definir los porcentajes de pre-aviso para los alumnos.</p>
+                </div>
+            </div>
+
+            <!-- FILA SUPERIOR: Selección de Curso y Rango (Izquierda) y Calendario (Derecha si es Admin) -->
+            <div class="grid grid-cols-1 gap-6" :class="{'lg:grid-cols-4': isAdmin, 'lg:grid-cols-3': !isAdmin}">
+                
+                <!-- Panel de Fechas y Curso (Siempre visible) -->
+                <div class="bg-[#070e1e]/90 p-6 rounded-2xl shadow-xl border border-slate-800/80 flex flex-col justify-start space-y-5" :class="{'lg:col-span-1': isAdmin, 'lg:col-span-1': !isAdmin}">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-100 mb-1.5 flex items-center gap-1.5"><i class="ph ph-books text-blue-400 text-lg"></i> 1. Curso Lectivo</label>
+                        <p class="text-[11px] text-slate-400 mb-2">Elige el curso guardado. Si eres administrador, podrás configurar los días festivos y guardar el calendario con su rango.</p>
+                        <select v-model="selectedCalendarId" @change="loadCalendar" class="w-full text-sm border border-slate-700 rounded-xl py-3 px-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-[#0d1b35] font-semibold text-slate-100 shadow-sm cursor-pointer outline-none">
+                            <option value="">-- Selecciona tu calendario --</option>
+                            <option v-for="cal in savedCalendars" :key="cal.id" :value="cal.id">{{ cal.name }}</option>
+                        </select>
+                        <p v-if="settings.defaultCalendarId && savedCalendars.find(c => c.id === settings.defaultCalendarId)" class="text-[10px] mt-2 text-slate-500">Calendario por defecto: <strong class="text-slate-100">{{ savedCalendars.find(c => c.id === settings.defaultCalendarId).name }}</strong></p>
+                        <p v-if="!isAdmin" class="text-[10px] mt-2 text-amber-300">En modo usuario solo puedes elegir el calendario. El administrador es quien configura los festivos y el rango.</p>
+                    </div>
+
+                    <div class="pt-4 border-t border-slate-800/80">
+                        <label class="block text-sm font-bold text-slate-100 mb-2 flex items-center gap-1.5"><i class="ph ph-calendar-blank text-blue-400 text-lg"></i> Rango de Evaluación</label>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Fecha de Inicio:</label>
+                                <input type="date" v-model="config.startDate" @change="updateCalendarViewToStart" :readonly="!isAdmin" :class="!isAdmin ? 'bg-[#040914] cursor-not-allowed text-slate-500' : 'bg-[#0d1b35] cursor-text text-slate-100'" class="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl font-bold outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-semibold text-slate-400 mb-1">Fecha de Fin:</label>
+                                <input type="date" v-model="config.endDate" :readonly="!isAdmin" :class="!isAdmin ? 'bg-[#040914] cursor-not-allowed text-slate-500' : 'bg-[#0d1b35] cursor-text text-slate-100'" class="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl font-bold outline-none">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Calendario Completo Multimes (Solo se muestra en Modo Admin, a la derecha de Selección de Curso - Sin Scroll) -->
+                <div v-if="isAdmin" class="lg:col-span-3 bg-[#070e1e]/95 p-5 rounded-2xl shadow-xl border border-indigo-500/20 animate-fade-in flex flex-col justify-between backdrop-blur-md">
+                    <div>
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800/80 pb-3 mb-4 gap-2">
+                            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                                <i class="ph ph-calendar-star text-indigo-400 text-xl"></i> Calendario Completo de Festivos
+                            </h3>
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" @click="promptSaveCalendar" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1 shadow-md transition">
+                                    <i class="ph ph-floppy-disk"></i> Guardar Curso / Festivos
+                                </button>
+                                <button v-if="selectedCalendarId" type="button" @click="setDefaultCalendar" class="text-xs bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1 shadow-md transition">
+                                    <i class="ph ph-star"></i> Establecer por defecto
+                                </button>
+                                <button v-if="selectedCalendarId" type="button" @click="promptDeleteCalendar" class="text-xs bg-red-950/50 text-red-400 border border-red-800 px-3 py-1.5 rounded-lg hover:bg-red-900 transition font-bold">
+                                    Eliminar Curso
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Calendario completo plano sin scroll -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 p-2 bg-[#040914] rounded-xl border border-slate-800">
+                            <div v-for="m in allCalendarMonths" :key="m.year + '-' + m.month" class="bg-[#070e1e] p-3 rounded-lg border border-slate-800/60 shadow-inner">
+                                <h4 class="text-xs font-black uppercase tracking-wider mb-2 text-center bg-indigo-500/10 py-1 rounded text-indigo-200">
+                                    {{ m.name }} {{ m.year }}
+                                </h4>
+                                
+                                <!-- Días de la semana -->
+                                <div class="grid grid-cols-7 gap-1 text-center text-[9px] font-bold text-slate-500 mb-1">
+                                    <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span class="text-red-400">S</span><span class="text-red-400">D</span>
+                                </div>
+                                
+                                <!-- Cuadrícula de días -->
+                                <div class="grid grid-cols-7 gap-1">
+                                    <div v-for="blank in getBlanksForMonth(m.year, m.month)" :key="'blank-'+blank" class="h-6"></div>
+                                    <div v-for="day in getDaysForMonth(m.year, m.month)" :key="day.dateStr" 
+                                         @click="toggleCalendarDay(day)" 
+                                         :class="getDayClasses(day)" 
+                                         class="h-6 flex flex-col items-center justify-center text-[10px] font-black rounded relative cursor-pointer select-none transition">
+                                        <span>{{ day.dayNum }}</span>
+                                        <span v-if="day.isHoliday && !day.isWeekend && !day.isOutOfRange" class="w-1.5 h-1.5 bg-red-500 rounded-full absolute bottom-0.5"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-center gap-4 mt-3 pt-2.5 border-t border-slate-800 text-[11px] text-slate-400 font-medium">
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-[#070e1e] border border-slate-700 rounded"></span>Lectivo</span>
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-red-500/20 border border-red-500/40 rounded"></span>Festivo / No Lectivo</span>
+                        <span class="flex items-center gap-1.5"><span class="w-3 h-3 bg-slate-800 border rounded"></span>Fin de semana</span>
+                    </div>
+                </div>
+
+                <!-- Panel de Carga de Excel en Modo Profesor (Ocupa el resto de la fila superior cuando no se es admin) -->
+                <div v-if="!isAdmin" class="lg:col-span-2 bg-[#070e1e]/90 p-8 rounded-2xl shadow-xl border border-slate-800/80 text-center flex flex-col justify-center backdrop-blur-md">
+                    <h2 class="text-xl font-bold mb-2 text-white">2. Cargar Informe de Faltas</h2>
+                    <p class="text-slate-400 mb-6 text-sm max-w-lg mx-auto">Sube el archivo Excel o CSV de la evaluación. Se calcularán automáticamente los porcentajes de cada alumno basándose en los días lectivos.</p>
+                    
+                    <label class="cursor-pointer border-2 border-dashed border-blue-500/40 bg-blue-950/10 hover:bg-blue-950/20 hover:border-blue-400 transition rounded-2xl p-10 flex flex-col items-center justify-center max-w-md mx-auto w-full group">
+                        <div class="p-4 bg-[#0d1b35] border border-slate-700 rounded-full shadow-lg mb-4 group-hover:scale-110 transition duration-300">
+                            <i class="ph ph-file-xls text-4xl text-blue-400"></i>
+                        </div>
+                        <span class="text-blue-300 font-bold text-base">Seleccionar archivo Excel</span>
+                        <span class="text-xs text-blue-500/80 mt-1">Formatos: .xlsx, .xls, .csv</span>
+                        <input type="file" ref="fileInput" class="hidden" accept=".xlsx, .xls, .csv" @change="handleFileUpload">
+                    </label>
+                    <p v-if="uploadError" class="text-red-400 mt-4 text-sm font-bold bg-red-950/30 p-2 rounded-lg border border-red-800/40"><i class="ph ph-warning-circle inline align-middle text-lg"></i> {{ uploadError }}</p>
+                </div>
+            </div>
+
+            <!-- FILA INFERIOR (Solo visible en Modo Administrador) -->
+            <div v-if="isAdmin" class="grid grid-cols-1 lg:grid-cols-4 gap-6 animate-fade-in">
+                
+                <!-- Bloque de Límites de Alerta (Abajo Izquierda para Admin) -->
+                <div class="lg:col-span-1 bg-[#070e1e]/90 p-5 rounded-2xl shadow-xl border border-indigo-500/20 flex flex-col justify-between space-y-4">
+                    <div>
+                        <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                            <h3 class="text-base font-bold text-white flex items-center gap-2">
+                                <i class="ph ph-sliders text-indigo-400 text-xl"></i> Límites de Alerta
+                            </h3>
+                        </div>
+                        <div class="space-y-3">
+                            <!-- Límites de Evaluación Continua -->
+                            <div class="bg-[#040914] p-3 rounded-lg border border-slate-800 space-y-2">
+                                <span class="text-xs font-bold text-blue-400">Evaluación Continua (Módulos)</span>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-400 mb-0.5">Límite Pérdida Máximo</label>
+                                    <div class="relative">
+                                        <input type="number" v-model="settings.thresholdEval" min="1" max="100" class="w-full pl-3 pr-10 py-1.5 border border-slate-700 rounded-lg focus:ring-indigo-500 bg-[#0d1b35] text-xs font-bold shadow-xs text-white outline-none">
+                                        <span class="absolute right-3 top-2 text-slate-400 text-xs font-bold">%</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-400 mb-0.5">Límite de Aviso / Advertencia</label>
+                                    <div class="relative">
+                                        <input type="number" v-model="settings.thresholdEvalWarning" min="1" max="100" class="w-full pl-3 pr-10 py-1.5 border border-slate-700 rounded-lg focus:ring-indigo-500 bg-[#0d1b35] text-xs font-bold shadow-xs text-white outline-none">
+                                        <span class="absolute right-3 top-2 text-slate-400 text-xs font-bold">%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Límites de Matrícula -->
+                            <div class="bg-[#040914] p-3 rounded-lg border border-slate-800 space-y-2">
+                                <span class="text-xs font-bold text-amber-400">Pérdida de Matrícula (Total)</span>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-400 mb-0.5">Límite Pérdida Máximo</label>
+                                    <div class="relative">
+                                        <input type="number" v-model="settings.thresholdMatricula" min="1" max="100" class="w-full pl-3 pr-10 py-1.5 border border-slate-700 rounded-lg focus:ring-indigo-500 bg-[#0d1b35] text-xs font-bold shadow-xs text-white outline-none">
+                                        <span class="absolute right-3 top-2 text-slate-400 text-xs font-bold">%</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-semibold text-slate-400 mb-0.5">Límite de Aviso / Advertencia</label>
+                                    <div class="relative">
+                                        <input type="number" v-model="settings.thresholdMatriculaWarning" min="1" max="100" class="w-full pl-3 pr-10 py-1.5 border border-slate-700 rounded-lg focus:ring-indigo-500 bg-[#0d1b35] text-xs font-bold shadow-xs text-white outline-none">
+                                        <span class="absolute right-3 top-2 text-slate-400 text-xs font-bold">%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="button" @click="saveSettingsToDrive" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-bold text-xs shadow-md transition duration-200 flex items-center justify-center gap-1.5 mt-2">
+                        <i class="ph ph-floppy-disk text-base"></i> Guardar Límites de Alerta
+                    </button>
+                </div>
+
+                <!-- Panel de administración con importación para cuadrantes de horas -->
+                <div class="lg:col-span-3 bg-[#070e1e]/90 p-8 rounded-2xl shadow-xl border border-slate-800/80 flex flex-col justify-center">
+                    <h2 class="text-xl font-bold mb-2 text-white flex items-center gap-2">
+                        <i class="ph ph-shield-check text-indigo-300"></i>
+                        Panel de Administración
+                    </h2>
+                    <p class="text-slate-300 text-sm">En modo administrador solo se permite:</p>
+                    <ul class="mt-3 text-sm text-slate-400 space-y-1 list-disc pl-5">
+                        <li>Configurar calendario, festivos y límites de alertas.</li>
+                        <li>Crear o editar cuadrantes de horas compartidos.</li>
+                        <li>Consultar, filtrar y exportar el log de acciones.</li>
+                    </ul>
+
+                    <div class="mt-5 border-t border-slate-800 pt-4">
+                        <h3 class="text-sm font-bold text-white mb-1.5">Importar informe para crear/editar cuadrantes</h3>
+                        <p class="text-xs text-slate-400 mb-4">Este archivo solo se usa para detectar grupo y módulos del horario. En modo admin no se calcula absentismo del alumnado.</p>
+
+                        <label class="cursor-pointer border-2 border-dashed border-blue-500/40 bg-blue-950/10 hover:bg-blue-950/20 hover:border-blue-400 transition rounded-2xl p-6 flex flex-col items-center justify-center max-w-md w-full group">
+                            <div class="p-3 bg-[#0d1b35] border border-slate-700 rounded-full shadow-md mb-3 group-hover:scale-105 transition duration-300">
+                                <i class="ph ph-file-xls text-3xl text-blue-400"></i>
+                            </div>
+                            <span class="text-blue-300 font-bold text-sm">Cargar informe para cuadrante</span>
+                            <span class="text-[11px] text-blue-500/80 mt-1">Formatos: .xlsx, .xls, .csv</span>
+                            <input type="file" ref="fileInput" class="hidden" accept=".xlsx, .xls, .csv" @change="handleFileUpload">
+                        </label>
+
+                        <p v-if="uploadError" class="text-red-400 mt-3 text-sm font-bold bg-red-950/30 p-2 rounded-lg border border-red-800/40"><i class="ph ph-warning-circle inline align-middle text-lg"></i> {{ uploadError }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="isAdmin" class="bg-[#070e1e]/95 p-4 rounded-2xl shadow-xl border border-slate-800">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <h3 class="text-sm font-black text-white flex items-center gap-2">
+                        <i class="ph ph-list-checks text-blue-400"></i>
+                        Registro de acciones (Solo administrador)
+                    </h3>
+                    <span class="text-[11px] text-slate-400 font-semibold">Usuario actual: {{ currentUserEmail || 'Sin identificar' }}</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                    <input type="text" v-model="logFilters.query" placeholder="Buscar texto libre..." class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.student" placeholder="Alumno" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.module" placeholder="Módulo / Asignatura" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.user" placeholder="Usuario (email)" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
+                    <select v-model="logFilters.action" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                        <option value="">Todas las acciones</option>
+                        <option v-for="name in logActionOptions" :key="name" :value="name">{{ name }}</option>
+                    </select>
+                    <input type="date" v-model="logFilters.dateFrom" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="date" v-model="logFilters.dateTo" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="button" @click="clearLogFilters" class="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition">
+                        Limpiar filtros
+                    </button>
+                    <button type="button" @click="exportFilteredActionLogCsv" :disabled="filteredActionLog.length === 0" class="px-3 py-2 rounded-lg border border-emerald-700/70 bg-emerald-900/30 hover:bg-emerald-800/40 text-emerald-200 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        Exportar CSV
+                    </button>
+                </div>
+
+                <div class="text-[11px] text-slate-400 mb-2">
+                    Mostrando {{ filteredActionLog.length }} de {{ actionLog.length }} registros.
+                </div>
+
+                <div v-if="filteredActionLog.length === 0" class="text-xs text-slate-400 bg-[#040914] border border-slate-800 rounded-lg p-3">
+                    No hay registros que coincidan con los filtros.
+                </div>
+
+                <div v-else class="max-h-80 overflow-y-auto rounded-lg border border-slate-800 bg-[#040914] divide-y divide-slate-800">
+                    <div v-for="entry in filteredActionLog" :key="entry.id" class="p-2.5 text-xs text-slate-300">
+                        <div class="font-bold text-slate-100">{{ entry.action }}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">
+                            {{ formatDisplayDate(entry.timestamp) }} | {{ entry.user || 'Usuario no identificado' }}
+                        </div>
+                        <div v-if="entry.student || entry.module" class="text-[11px] text-blue-300 mt-0.5">
+                            <span v-if="entry.student">Alumno: {{ entry.student }}</span>
+                            <span v-if="entry.student && entry.module"> | </span>
+                            <span v-if="entry.module">Módulo: {{ entry.module }}</span>
+                        </div>
+                        <div v-if="entry.details" class="text-[11px] text-slate-500 mt-0.5">{{ entry.details }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 2: Configuración de Horario Semanal de Módulos -->
+        <div v-if="step === 2" class="bg-[#070e1e]/95 p-6 rounded-2xl shadow-xl border border-slate-800/80 animate-fade-in backdrop-blur-md">
+            
+            <div class="flex flex-col lg:flex-row justify-between lg:items-center gap-4 mb-6 pb-4 border-b border-slate-800">
+                <div>
+                    <h2 class="text-xl font-bold flex items-center gap-2 text-white">
+                        <i class="ph ph-clock text-blue-400"></i> Horas de Módulos (Horario Semanal)
+                    </h2>
+                    <p class="text-sm text-slate-400 mt-1" v-if="detectedCourse">
+                        Grupo detectado en el archivo: <strong class="text-blue-200 bg-blue-950 px-2.5 py-1 rounded border border-blue-900 shadow-inner">{{ detectedCourse }}</strong>
+                    </p>
+                </div>
+                
+                <div class="flex flex-wrap items-center gap-2.5 bg-[#040914] p-2.5 rounded-xl border border-slate-800 shadow-inner">
+                    <span class="text-xs text-slate-400 font-bold whitespace-nowrap flex items-center gap-1">
+                        <i class="ph ph-users text-blue-400"></i> Horarios Guardados:
+                    </span>
+                    <select v-model="selectedScheduleId" @change="loadSchedule" class="text-xs border border-slate-700 rounded-lg py-2 pl-2 pr-7 focus:ring-blue-500 bg-[#0d1b35] text-slate-100 font-medium cursor-pointer outline-none">
+                        <option value="">-- Selecciona tu clase --</option>
+                        <option v-for="sched in savedSchedules" :key="sched.id" :value="sched.id">{{ sched.name }}</option>
+                    </select>
+                    <button v-if="isAdmin" type="button" @click="promptSaveSchedule" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition shadow-md flex items-center gap-1">
+                        <i class="ph ph-floppy-disk"></i> Guardar para todos
+                    </button>
+                    <button v-if="selectedScheduleId && isAdmin" type="button" @click="promptDeleteSchedule" class="text-red-400 hover:text-red-200 p-2 hover:bg-red-950/40 rounded-lg transition" title="Eliminar horario">
+                        <i class="ph ph-trash text-base"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <p class="text-sm text-slate-300 mb-2 font-medium">Revisa las horas teóricas de cada módulo para los días de la semana.</p>
+            <p v-if="!isAdmin" class="text-sm text-amber-200 mb-6 font-medium">Solo el administrador puede editar estas horas y configurar los festivos. Tú puedes seleccionar tu clase y ver el horario.</p>
+            <p v-else class="text-sm text-slate-300 mb-6 font-medium">En modo administrador usa esta pantalla para crear o ajustar cuadrantes y luego guardarlos para todos.</p>
+
+            <div class="mt-8 flex justify-between items-center bg-[#040914] p-4 rounded-xl border border-slate-800 mb-4">
+                <button type="button" @click="resetToStep1" class="text-slate-300 hover:text-white bg-[#070e1e] border border-slate-700 flex items-center gap-2 font-bold text-sm px-4 py-2.5 rounded-lg transition shadow-md">
+                    <i class="ph ph-arrow-left"></i> Cambiar Archivo
+                </button>
+                <button v-if="!isAdmin" type="button" @click="calculateResults" class="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-xl font-black shadow-lg transition flex items-center gap-2 text-lg transform hover:scale-[1.02]">
+                    <i class="ph ph-calculator"></i> Calcular Absentismo
+                </button>
+                <button v-else type="button" @click="promptSaveSchedule" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-black shadow-lg transition flex items-center gap-2 text-sm transform hover:scale-[1.02]">
+                    <i class="ph ph-floppy-disk"></i> Guardar Cuadrante
+                </button>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-800 bg-[#040914]">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-[#070e1e] text-slate-300 text-xs border-b border-slate-800">
+                            <th class="p-3 font-bold w-1/3">Módulo / Materia</th>
+                            <th class="p-3 text-center font-bold">Lunes</th>
+                            <th class="p-3 text-center font-bold">Martes</th>
+                            <th class="p-3 text-center font-bold">Miércoles</th>
+                            <th class="p-3 text-center font-bold">Jueves</th>
+                            <th class="p-3 text-center font-bold">Viernes</th>
+                            <th class="p-3 text-center font-black text-blue-300 bg-blue-950/40">Total Semanal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="mod in modules" :key="mod" class="border-b border-slate-800/40 last:border-none hover:bg-[#070e1e]/40 transition">
+                            <td class="p-3 text-sm font-semibold text-slate-200">{{ mod }}</td>
+                            <td class="p-2" v-for="day in [1, 2, 3, 4, 5]" :key="day">
+                                <input type="number" min="0" max="10" v-model="schedule[mod][day]" :disabled="!isAdmin" class="w-14 mx-auto block px-2 py-1 text-center border border-slate-700 rounded focus:ring-blue-500 bg-[#0d1b35] text-white font-semibold" :class="!isAdmin ? 'bg-slate-800 text-slate-400 cursor-not-allowed' : ''">
+                            </td>
+                            <td class="p-3 text-center font-black text-blue-400 bg-blue-950/20">
+                                {{ getWeeklyTotal(mod) }} h
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-8 flex justify-between items-center bg-[#040914] p-4 rounded-xl border border-slate-800">
+                <button type="button" @click="resetToStep1" class="text-slate-300 hover:text-white bg-[#070e1e] border border-slate-700 flex items-center gap-2 font-bold text-sm px-4 py-2.5 rounded-lg transition shadow-md">
+                    <i class="ph ph-arrow-left"></i> Cambiar Archivo
+                </button>
+                <button v-if="!isAdmin" type="button" @click="calculateResults" class="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-xl font-black shadow-lg transition flex items-center gap-2 text-lg transform hover:scale-[1.02]">
+                    <i class="ph ph-calculator"></i> Calcular Absentismo
+                </button>
+                <button v-else type="button" @click="promptSaveSchedule" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-black shadow-lg transition flex items-center gap-2 text-sm transform hover:scale-[1.02]">
+                    <i class="ph ph-floppy-disk"></i> Guardar Cuadrante
+                </button>
+            </div>
+        </div>
+
+        <!-- STEP 3: Resultados Finales del Alumnado -->
+        <div v-if="step === 3 && !isAdmin" class="space-y-6 animate-fade-in">
+            
+            <div class="flex justify-between items-center bg-[#070e1e]/95 p-5 rounded-2xl shadow-xl border border-slate-800">
+                <h2 class="text-xl font-black flex items-center gap-2 text-white">
+                    <i class="ph ph-student text-blue-400"></i> Estadísticas del Alumnado
+                </h2>
+                <div class="flex gap-2">
+                    <button type="button" @click="resetToStep1" class="text-slate-300 bg-slate-800 hover:bg-slate-700 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg transition border border-slate-700 shadow-sm">
+                        <i class="ph ph-file-plus text-base"></i> Nuevo Archivo
+                    </button>
+                    <button type="button" @click="selectAllToggle" class="text-slate-300 bg-slate-800/60 hover:bg-slate-700/60 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg transition border border-slate-700 shadow-sm">
+                        <i class="ph ph-check-square text-base"></i> {{ allFilteredSelected ? 'Deseleccionar todos' : 'Seleccionar todos' }}
+                    </button>
+                    <button type="button" @click="generateAbsentismoPdfs" class="text-slate-100 bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-lg transition shadow-sm">
+                        <i class="ph ph-file-pdf text-base"></i> Generar PDFs
+                    </button>
+                    <button v-if="isAdmin" type="button" @click="step = 2" class="text-blue-300 bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg transition shadow-sm">
+                        <i class="ph ph-clock text-base"></i> Editar Horas
+                    </button>
+                </div>
+            </div>
+
+            <!-- Buscador y Filtros -->
+            <div class="flex flex-col md:flex-row gap-4 bg-[#070e1e]/95 p-4 rounded-2xl shadow-xl border border-slate-800">
+                <div class="relative flex-1">
+                    <i class="ph ph-magnifying-glass absolute left-3 top-3.5 text-slate-500 text-lg"></i>
+                    <input type="text" v-model="searchQuery" placeholder="Buscar por nombre de alumno..." class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-700 bg-[#040914] focus:bg-[#0d1b35] focus:ring-2 focus:ring-blue-500 outline-none font-medium text-white transition-all">
+                </div>
+                <select v-model="filterStatus" class="rounded-xl border border-slate-700 px-4 py-2.5 bg-[#040914] text-slate-300 focus:bg-[#0d1b35] focus:ring-2 focus:ring-blue-500 font-bold outline-none cursor-pointer">
+                    <option value="all">Mostrar todos</option>
+                    <option value="matricula">Pérdida de Matrícula ({{ settings.thresholdMatricula }}%)</option>
+                    <option value="aviso-matricula">Pre-Aviso de Matrícula ({{ settings.thresholdMatriculaWarning }}%)</option>
+                    <option value="evaluacion">Pérdida de Ev. Continua ({{ settings.thresholdEval }}%)</option>
+                    <option value="aviso-evaluacion">Pre-Aviso de Ev. Continua ({{ settings.thresholdEvalWarning }}%)</option>
+                    <option value="ok">Asistencia correcta</option>
+                </select>
+            </div>
+
+            <!-- Tarjetas de Alumnos -->
+            <div class="space-y-4">
+                <div v-for="student in filteredResults" :key="student.name" class="bg-[#070e1e] rounded-2xl shadow-xl border-2 overflow-hidden transition-all duration-300" 
+                     :class="{'border-red-500/80 shadow-red-500/5 bg-[#170609]': student.pierdeMatricula, 'border-orange-500/80 shadow-orange-500/5 bg-[#170d06]': !student.pierdeMatricula && student.avisoMatricula, 'border-yellow-500/80 shadow-yellow-500/5 bg-[#171606]': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length > 0, 'border-blue-500/80 shadow-blue-500/5 bg-[#060e17]': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length > 0, 'border-slate-800': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length === 0}">
+                    
+                    <div class="p-5 flex flex-col gap-4 border-b border-slate-800"
+                         :class="{'bg-red-500/10': student.pierdeMatricula, 'bg-orange-500/10': !student.pierdeMatricula && student.avisoMatricula, 'bg-yellow-500/10': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length > 0, 'bg-blue-500/10': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length > 0, 'bg-[#070e1e]': !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length === 0}">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div class="flex items-center gap-3">
+                                <input type="checkbox" v-model="student.selectedForPdf" class="w-4 h-4" aria-label="Seleccionar alumno" />
+                                <h3 class="text-lg font-black text-white">{{ student.name }}</h3>
+                            </div>
+                            <div class="text-[10px] text-slate-300">
+                                <div class="font-bold text-[11px] mb-1">Matrícula</div>
+                                <select v-model="student.informedMatricula" @change="onMatriculaNoticeChange(student)" class="bg-[#040914] border border-slate-700 text-xs text-slate-200 px-2 py-1 rounded">
+                                    <option value="none">No avisos</option>
+                                    <option value="50">Aviso 50%</option>
+                                    <option value="100">Aviso 100%</option>
+                                </select>
+                                <p v-if="student.informedMatricula !== 'none' && student.informedMatriculaDate" class="mt-1 text-[10px] text-emerald-300 font-semibold">
+                                    Fecha: {{ formatDisplayDate(student.informedMatriculaDate) }}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <p class="text-sm text-slate-400 font-medium">Faltas acumuladas: <strong class="text-white bg-[#040914] px-2.5 py-0.5 rounded border border-slate-800 shadow-inner">{{ student.totalAbsences }} / {{ totalCourseHours }} hrs</strong> ({{ student.totalPercent }}%)</p>
+                        </div>
+
+                        <div class="flex flex-wrap gap-2">
+                            <!-- Etiquetas con colores corporativos e iconografía clara -->
+                            <span v-if="student.pierdeMatricula" class="px-3 py-1.5 bg-red-500/20 text-red-300 border border-red-500/50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md">
+                                <i class="ph ph-warning-octagon text-base text-red-400 animate-pulse"></i> EXCESO DE FALTAS (PÉRDIDA MATRÍCULA)
+                            </span>
+                            <span v-else-if="student.avisoMatricula" class="px-3 py-1.5 bg-orange-500/20 text-orange-300 border border-orange-500/50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md">
+                                <i class="ph ph-bell-ringing text-base text-orange-400 animate-bounce"></i> ADVERTENCIA (SITUACIÓN LÍMITE)
+                            </span>
+                            
+                            <span v-if="student.modulosPerdidos.length > 0" class="px-3 py-1.5 bg-yellow-500/20 text-yellow-300 border border-yellow-500/50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md">
+                                <i class="ph ph-warning text-base text-yellow-400"></i> PÉRDIDA EVALUACIÓN CONTINUA ({{ student.modulosPerdidos.length }} mód)
+                            </span>
+                            <span v-else-if="student.modulosAviso.length > 0" class="px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md">
+                                <i class="ph ph-info text-base text-blue-400"></i> PRE-AVISO EVALUACIÓN ({{ student.modulosAviso.length }} mód)
+                            </span>
+                            
+                            <span v-if="!student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length === 0" class="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md">
+                                <i class="ph ph-check-circle text-base text-emerald-400"></i> ASISTENCIA CORRECTA
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Desglose por módulo en formato cuadrícula responsiva -->
+                    <div class="p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 bg-[#040914]">
+                        <div v-for="mod in student.moduleStats" :key="mod.name" 
+                             class="p-4 rounded-xl border flex flex-col justify-between transition-all duration-200 shadow-sm"
+                             :class="mod.pierde ? 'bg-red-950/15 border-red-500/30' : (mod.aviso ? 'bg-blue-950/15 border-blue-500/30' : 'bg-[#070e1e] border-slate-800')">
+                            <div class="mb-3">
+                                <div class="flex justify-between items-start gap-1">
+                                    <h4 class="text-xs font-bold text-slate-100 leading-snug" :title="mod.name">{{ mod.name }}</h4>
+                                    <span v-if="mod.pierde" class="text-[9px] font-black text-red-300 bg-red-500/20 border border-red-500/30 px-1.5 py-0.5 rounded uppercase flex-shrink-0">Pérdida</span>
+                                    <span v-else-if="mod.aviso" class="text-[9px] font-black text-blue-300 bg-blue-500/20 border border-blue-500/30 px-1.5 py-0.5 rounded uppercase flex-shrink-0">Pre-Aviso</span>
+                                </div>
+                            </div>
+                            <div class="mb-3 flex items-center justify-between gap-2 text-[10px]">
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-300 mr-2">Evaluación</label>
+                                    <select v-model="mod.informedEvaluation" @change="onModuleNoticeChange(student, mod)" class="bg-[#040914] border border-slate-700 text-xs text-slate-200 px-2 py-1 rounded">
+                                        <option value="none">No avisos</option>
+                                        <option value="50">Aviso 50%</option>
+                                        <option value="100">Aviso 100%</option>
+                                    </select>
+                                    <p v-if="mod.informedEvaluation !== 'none' && mod.informedEvaluationDate" class="mt-1 text-[10px] text-emerald-300 font-semibold">
+                                        Fecha: {{ formatDisplayDate(mod.informedEvaluationDate) }}
+                                    </p>
+                                </div>
+                                <span :class="(mod.informedEvaluation !== 'none') ? 'text-emerald-300' : 'text-slate-400'" class="font-bold uppercase tracking-wider">
+                                    {{ mod.informedEvaluation === 'none' ? 'Sin avisos' : (mod.informedEvaluation === '50' ? 'Aviso 50%' : 'Aviso 100%') }}
+                                </span>
+                            </div>
+                            <div class="mt-auto">
+                                <div class="flex justify-between items-end mb-1.5 text-xs">
+                                    <span class="text-slate-400 font-medium">Faltas: <strong class="text-slate-200">{{ mod.absences }} / {{ mod.totalHours }}</strong></span>
+                                    <span class="font-black text-sm" :class="mod.pierde ? 'text-red-400' : (mod.aviso ? 'text-blue-400' : 'text-slate-300')">{{ mod.percent }}%</span>
+                                </div>
+                                <!-- Barra visual estilizada con colores de alerta corporativos -->
+                                <div class="w-full bg-[#03060f] rounded-full h-2 overflow-hidden border border-slate-800">
+                                    <div class="h-2 rounded-full transition-all duration-500" 
+                                         :class="mod.pierde ? 'bg-red-500' : (mod.aviso ? 'bg-blue-500' : 'bg-emerald-500')" 
+                                         :style="`width: ${Math.min(mod.percent, 100)}%`"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="filteredResults.length === 0" class="text-center py-12 bg-[#070e1e] rounded-2xl border border-slate-800 text-slate-500 shadow-md">
+                    <i class="ph ph-magnifying-glass text-5xl mb-3 text-slate-600"></i>
+                    <p class="font-bold text-lg text-slate-300">No hay resultados</p>
+                    <p class="text-sm mt-1 text-slate-500">Ningún alumno coincide con los filtros de búsqueda aplicados.</p>
+                </div>
+            </div>
+
+            <div v-if="isAdmin" class="bg-[#070e1e]/95 p-4 rounded-2xl shadow-xl border border-slate-800">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <h3 class="text-sm font-black text-white flex items-center gap-2">
+                        <i class="ph ph-list-checks text-blue-400"></i>
+                        Registro de acciones (Solo administrador)
+                    </h3>
+                    <span class="text-[11px] text-slate-400 font-semibold">Usuario actual: {{ currentUserEmail || 'Sin identificar' }}</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                    <input type="text" v-model="logFilters.query" placeholder="Buscar texto libre..." class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.student" placeholder="Alumno" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.module" placeholder="Módulo / Asignatura" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="text" v-model="logFilters.user" placeholder="Usuario (email)" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
+                    <select v-model="logFilters.action" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                        <option value="">Todas las acciones</option>
+                        <option v-for="name in logActionOptions" :key="name" :value="name">{{ name }}</option>
+                    </select>
+                    <input type="date" v-model="logFilters.dateFrom" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="date" v-model="logFilters.dateTo" class="px-3 py-2 rounded-lg border border-slate-700 bg-[#040914] text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="button" @click="clearLogFilters" class="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition">
+                        Limpiar filtros
+                    </button>
+                    <button type="button" @click="exportFilteredActionLogCsv" :disabled="filteredActionLog.length === 0" class="px-3 py-2 rounded-lg border border-emerald-700/70 bg-emerald-900/30 hover:bg-emerald-800/40 text-emerald-200 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        Exportar CSV
+                    </button>
+                </div>
+
+                <div class="text-[11px] text-slate-400 mb-2">
+                    Mostrando {{ filteredActionLog.length }} de {{ actionLog.length }} registros.
+                </div>
+
+                <div v-if="filteredActionLog.length === 0" class="text-xs text-slate-400 bg-[#040914] border border-slate-800 rounded-lg p-3">
+                    No hay registros que coincidan con los filtros.
+                </div>
+
+                <div v-else class="max-h-80 overflow-y-auto rounded-lg border border-slate-800 bg-[#040914] divide-y divide-slate-800">
+                    <div v-for="entry in filteredActionLog" :key="entry.id" class="p-2.5 text-xs text-slate-300">
+                        <div class="font-bold text-slate-100">{{ entry.action }}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">
+                            {{ formatDisplayDate(entry.timestamp) }} | {{ entry.user || 'Usuario no identificado' }}
+                        </div>
+                        <div v-if="entry.student || entry.module" class="text-[11px] text-blue-300 mt-0.5">
+                            <span v-if="entry.student">Alumno: {{ entry.student }}</span>
+                            <span v-if="entry.student && entry.module"> | </span>
+                            <span v-if="entry.module">Módulo: {{ entry.module }}</span>
+                        </div>
+                        <div v-if="entry.details" class="text-[11px] text-slate-500 mt-0.5">{{ entry.details }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer Corporativo -->
+    <footer class="mt-8 border-t border-slate-800/80 py-4 text-center text-slate-500 text-xs font-semibold">
+        <p>© 2026 Colegio Sagrado Corazón - Departamento de Orientación y Jefatura de Estudios</p>
+    </footer>
+
+    <!-- Sistema de Diálogos Modales Integrados -->
+    <div v-if="modal.show" class="fixed inset-0 bg-gray-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+        <div class="bg-[#070e1e] rounded-2xl p-6 max-w-sm w-full border border-slate-700 shadow-2xl transform transition-all text-slate-100">
+            <div class="flex items-center gap-3 mb-4 text-white">
+                <i :class="modal.icon" class="text-3xl text-indigo-400"></i>
+                <h3 class="text-xl font-black">{{ modal.title }}</h3>
+            </div>
+            
+            <p v-if="modal.message" class="mb-5 text-sm text-slate-300 font-medium leading-relaxed">{{ modal.message }}</p>
+            
+            <input v-if="modal.needsInput" :type="modal.inputType || 'text'" v-model="modal.inputValue" 
+                   class="w-full border border-slate-700 bg-[#040914] rounded-xl p-3 mb-2 focus:ring-2 focus:ring-indigo-500 outline-none transition text-base font-bold text-center tracking-wider text-white"
+                   @keyup.enter="confirmModal" autocomplete="off">
+                   
+            <div class="flex justify-end gap-2 mt-6">
+                <button type="button" @click="modal.show = false" class="px-4 py-2.5 text-sm font-bold text-slate-400 hover:text-white rounded-xl transition">
+                    Cancelar
+                </button>
+                <button type="button" @click="confirmModal" :class="modal.confirmClass || 'bg-blue-600 hover:bg-blue-700 text-white'" class="px-5 py-2.5 text-sm font-bold rounded-xl shadow-sm transition">
+                    {{ modal.confirmText || 'Aceptar' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script type="module">
+    // =========================================================================
+    // ⚙️ CONFIGURACIÓN AUTOMÁTICA DE GOOGLE DRIVE ⚙️
+    // =========================================================================
+    const URL_DEL_SCRIPT = "https://script.google.com/macros/s/AKfycbynT-jNI7Y2b_W52WXccbZ-Zg07Uvzh5EuFX0PpyZSHwP66wW3igO1bIvktmQk-4d4pCQ/exec";
+    // =========================================================================
+
+    const { createApp } = Vue;
+    createApp({
+        data() {
+            return {
+                step: 1,
+                isAdmin: false,
+                logoFailed: false,
+                isSyncing: false,
+                driveUrl: URL_DEL_SCRIPT.includes('script.google.com') ? URL_DEL_SCRIPT : '',
+                settings: {
+                    thresholdEval: 15,
+                    thresholdEvalWarning: 7.5,
+                    thresholdMatricula: 20,
+                    thresholdMatriculaWarning: 10,
+                    defaultCalendarId: ''
+                },
+                config: { startDate: '', endDate: '', holidays: [] },
+                uploadError: null,
+                currentCalendarMonth: new Date().getMonth(),
+                currentCalendarYear: new Date().getFullYear(),
+                monthNames: [
+                    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+                ],
+                savedCalendars: [],
+                        
+                savedSchedules: [],
+                selectedCalendarId: '',
+                selectedScheduleId: '',
+                detectedCourse: '',
+                currentUserEmail: '',
+                isAuthenticated: false,
+                authError: '',
+                institutionalDomain: 'sagrado-corazon.es',
+                googleClientId: '523053820797-pgh6mp7hagllp1cdhul8l5j2lulb78g2.apps.googleusercontent.com',
+                noticeStates: {},
+                actionLog: [],
+                logFilters: {
+                    query: '',
+                    student: '',
+                    module: '',
+                    user: '',
+                    action: '',
+                    dateFrom: '',
+                    dateTo: ''
+                },
+                syncDebounceTimer: null,
+
+                modules: [],
+                studentsData: {}, 
+                schedule: {}, 
+                
+                totalCourseHours: 0,
+                processedResults: [],
+
+                searchQuery: '',
+                filterStatus: 'all',
+
+                modal: {
+                    show: false, title: '', message: '', needsInput: false, inputValue: '', inputType: 'text',
+                    icon: 'ph ph-info', confirmText: 'Aceptar', confirmClass: 'bg-blue-600 hover:bg-blue-700 text-white', onConfirm: null
+                }
+            }
+        },
+        computed: {
+            isUrlConfigured() {
+                return this.driveUrl && this.driveUrl.startsWith('https://script.google.com/');
+            },
+            filteredResults() {
+                return this.processedResults.filter(student => {
+                    const matchesSearch = student.name.toLowerCase().includes(this.searchQuery.toLowerCase());
+                    if (!matchesSearch) return false;
+                    
+                    if (this.filterStatus === 'matricula') return student.pierdeMatricula;
+                    if (this.filterStatus === 'aviso-matricula') return student.avisoMatricula;
+                    if (this.filterStatus === 'evaluacion') return student.modulosPerdidos.length > 0;
+                    if (this.filterStatus === 'aviso-evaluacion') return student.modulosPerdidos.length === 0 && student.modulosAviso.length > 0;
+                    if (this.filterStatus === 'ok') return !student.pierdeMatricula && !student.avisoMatricula && student.modulosPerdidos.length === 0 && student.modulosAviso.length === 0;
+                    
+                    return true;
+                });
+            },
+            
+            // --- PROPIEDADES PARA GENERAR EL CALENDARIO COMPLETO (MULTIMES) ---
+            allCalendarMonths() {
+                // Rango por defecto si no están definidos
+                let start = new Date(this.config.startDate || '2025-09-01');
+                let end = new Date(this.config.endDate || '2026-06-30');
+                
+                // Prevenir cuelgues si las fechas son inválidas o al revés
+                if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+                    start = new Date('2025-09-01');
+                    end = new Date('2026-06-30');
+                }
+
+                let months = [];
+                let currYear = start.getFullYear();
+                let currMonth = start.getMonth();
+                let endYear = end.getFullYear();
+                let endMonth = end.getMonth();
+                
+                let safety = 0;
+                while ((currYear < endYear || (currYear === endYear && currMonth <= endMonth)) && safety < 24) {
+                    months.push({
+                        year: currYear,
+                        month: currMonth,
+                        name: this.monthNames[currMonth]
+                    });
+                    currMonth++;
+                    if (currMonth > 11) {
+                        currMonth = 0;
+                        currYear++;
+                    }
+                    safety++;
+                }
+                return months;
+            }
+            ,
+            allFilteredSelected() {
+                const list = this.filteredResults || [];
+                if (list.length === 0) return false;
+                return list.every(s => s.selectedForPdf);
+            },
+            logActionOptions() {
+                const unique = new Set((this.actionLog || []).map(e => e.action).filter(Boolean));
+                return Array.from(unique).sort((a, b) => a.localeCompare(b));
+            },
+            filteredActionLog() {
+                const safe = (v) => (v || '').toString().toLowerCase();
+                const q = safe(this.logFilters.query);
+                const student = safe(this.logFilters.student);
+                const moduleName = safe(this.logFilters.module);
+                const user = safe(this.logFilters.user);
+                const action = this.logFilters.action || '';
+                const fromDate = this.logFilters.dateFrom ? new Date(`${this.logFilters.dateFrom}T00:00:00`) : null;
+                const toDate = this.logFilters.dateTo ? new Date(`${this.logFilters.dateTo}T23:59:59`) : null;
+
+                return [...(this.actionLog || [])]
+                    .reverse()
+                    .filter(entry => {
+                        if (action && entry.action !== action) return false;
+
+                        const ts = entry.timestamp ? new Date(entry.timestamp) : null;
+                        if (fromDate && (!ts || ts < fromDate)) return false;
+                        if (toDate && (!ts || ts > toDate)) return false;
+
+                        if (student && !safe(entry.student).includes(student)) return false;
+                        if (moduleName && !safe(entry.module).includes(moduleName)) return false;
+                        if (user && !safe(entry.user).includes(user)) return false;
+
+                        if (q) {
+                            const haystack = `${safe(entry.action)} ${safe(entry.details)} ${safe(entry.student)} ${safe(entry.module)} ${safe(entry.user)}`;
+                            if (!haystack.includes(q)) return false;
+                        }
+
+                        return true;
+                    });
+            }
+        },
+        async mounted() {
+            await this.initializeInstitutionalAccess();
+            if (!this.isAuthenticated) return;
+
+            if (this.isUrlConfigured) {
+                await this.loadFromGoogleDrive();
+            } else {
+                this.loadFromLocalStorage();
+            }
+        },
+        methods: {
+            handleLogoError() { this.logoFailed = true; },
+
+            parseJwtPayload(token) {
+                try {
+                    const parts = (token || '').split('.');
+                    if (parts.length < 2) return null;
+                    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                    const json = decodeURIComponent(atob(base64).split('').map(c => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`).join(''));
+                    return JSON.parse(json);
+                } catch (e) {
+                    return null;
+                }
+            },
+            validateInstitutionalCredential(credential) {
+                const payload = this.parseJwtPayload(credential);
+                if (!payload) {
+                    return { valid: false, reason: 'No se pudo validar el token de autenticación.' };
+                }
+
+                const email = (payload.email || '').toLowerCase();
+                const verified = !!payload.email_verified;
+                const domainOk = email.endsWith(`@${this.institutionalDomain}`);
+                const hd = (payload.hd || '').toLowerCase();
+                const hostedDomainOk = hd === this.institutionalDomain;
+
+                if (!verified || !domainOk || !hostedDomainOk) {
+                    return { valid: false, reason: `Acceso denegado. Debes usar una cuenta @${this.institutionalDomain}.` };
+                }
+
+                return { valid: true, email };
+            },
+            handleGoogleCredentialResponse(response) {
+                const credential = response && response.credential ? response.credential : '';
+                const check = this.validateInstitutionalCredential(credential);
+                if (!check.valid) {
+                    this.isAuthenticated = false;
+                    this.currentUserEmail = '';
+                    this.authError = check.reason;
+                    localStorage.removeItem('sc_id_token');
+                    localStorage.removeItem('local_current_user');
+                    return;
+                }
+
+                const previous = this.currentUserEmail;
+                this.currentUserEmail = check.email;
+                this.isAuthenticated = true;
+                this.authError = '';
+                localStorage.setItem('sc_id_token', credential);
+                this.saveToLocalStorage('local_current_user', this.currentUserEmail);
+
+                if (previous !== this.currentUserEmail) {
+                    this.pushActionLog('Inicio de sesión de usuario', `Usuario activo: ${this.currentUserEmail}`);
+                }
+            },
+            renderGoogleLoginButton() {
+                if (!this.$refs.googleLoginBtn || !window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+                this.$refs.googleLoginBtn.innerHTML = '';
+                window.google.accounts.id.initialize({
+                    client_id: this.googleClientId,
+                    callback: this.handleGoogleCredentialResponse,
+                    auto_select: false,
+                    cancel_on_tap_outside: true,
+                    ux_mode: 'popup'
+                });
+
+                window.google.accounts.id.renderButton(this.$refs.googleLoginBtn, {
+                    type: 'standard',
+                    theme: 'filled_black',
+                    size: 'large',
+                    text: 'signin_with',
+                    shape: 'pill',
+                    width: 320
+                });
+            },
+            async initializeInstitutionalAccess() {
+                if (!this.googleClientId || this.googleClientId.includes('PON_AQUI_TU_GOOGLE_CLIENT_ID')) {
+                    this.authError = 'Configura el Google Client ID para activar el acceso institucional.';
+                    return;
+                }
+
+                if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+                    this.authError = 'No se pudo cargar Google Identity Services. Revisa tu conexión.';
+                    return;
+                }
+
+                const savedToken = localStorage.getItem('sc_id_token');
+                if (savedToken) {
+                    const check = this.validateInstitutionalCredential(savedToken);
+                    if (check.valid) {
+                        this.currentUserEmail = check.email;
+                        this.isAuthenticated = true;
+                        this.authError = '';
+                        return;
+                    }
+                    localStorage.removeItem('sc_id_token');
+                }
+
+                await this.$nextTick();
+                this.renderGoogleLoginButton();
+            },
+            logoutInstitutionalSession() {
+                this.isAuthenticated = false;
+                this.currentUserEmail = '';
+                this.isAdmin = false;
+                this.step = 1;
+                this.authError = '';
+                localStorage.removeItem('sc_id_token');
+                localStorage.removeItem('local_current_user');
+                if (window.google && window.google.accounts && window.google.accounts.id) {
+                    window.google.accounts.id.disableAutoSelect();
+                }
+                this.renderGoogleLoginButton();
+            },
+
+            formatDisplayDate(isoString) {
+                if (!isoString) return '';
+                const date = new Date(isoString);
+                if (isNaN(date.getTime())) return '';
+                return date.toLocaleString('es-ES');
+            },
+            getNowIso() {
+                return new Date().toISOString();
+            },
+            normalizeTextKey(value) {
+                return (value || '')
+                    .toString()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .trim()
+                    .toLowerCase()
+                    .replace(/\s+/g, ' ');
+            },
+            normalizeStudentKey(name) {
+                return this.normalizeTextKey(name).replace(/[^a-z0-9 ]/g, '');
+            },
+            normalizeModuleKey(name) {
+                return this.normalizeTextKey(name).replace(/[^a-z0-9 ]/g, '');
+            },
+            getGlobalNoticeStore() {
+                if (!this.noticeStates || typeof this.noticeStates !== 'object' || Array.isArray(this.noticeStates)) {
+                    this.noticeStates = {};
+                }
+                if (!this.noticeStates.students || typeof this.noticeStates.students !== 'object' || Array.isArray(this.noticeStates.students)) {
+                    this.noticeStates.students = {};
+                }
+                return this.noticeStates;
+            },
+            migrateLegacyNoticeStates() {
+                const root = this.getGlobalNoticeStore();
+                const globalStudents = root.students;
+                const maybeBuckets = Object.entries(root)
+                    .filter(([k, v]) => k !== 'students' && v && typeof v === 'object' && v.students && typeof v.students === 'object');
+
+                if (maybeBuckets.length === 0) return;
+
+                maybeBuckets.forEach(([, bucket]) => {
+                    Object.entries(bucket.students || {}).forEach(([legacyName, legacyData]) => {
+                        const key = this.normalizeStudentKey(legacyName);
+                        if (!key) return;
+
+                        if (!globalStudents[key]) {
+                            globalStudents[key] = {
+                                name: legacyName,
+                                informedMatricula: 'none',
+                                informedMatriculaDate: '',
+                                modules: {}
+                            };
+                        }
+
+                        const target = globalStudents[key];
+                        if (!target.name) target.name = legacyName;
+
+                        const legacyMat = legacyData?.informedMatricula || 'none';
+                        const legacyMatDate = legacyData?.informedMatriculaDate || '';
+                        if (legacyMat !== 'none') {
+                            if (target.informedMatricula === 'none' || (legacyMatDate && (!target.informedMatriculaDate || legacyMatDate > target.informedMatriculaDate))) {
+                                target.informedMatricula = legacyMat;
+                                target.informedMatriculaDate = legacyMatDate;
+                            }
+                        }
+
+                        const legacyModules = legacyData?.modules || {};
+                        Object.entries(legacyModules).forEach(([legacyModuleName, legacyModuleData]) => {
+                            const modKey = this.normalizeModuleKey(legacyModuleName);
+                            if (!modKey) return;
+                            if (!target.modules[modKey]) {
+                                target.modules[modKey] = {
+                                    name: legacyModuleName,
+                                    informedEvaluation: 'none',
+                                    informedEvaluationDate: ''
+                                };
+                            }
+                            const targetMod = target.modules[modKey];
+                            const legacyEval = legacyModuleData?.informedEvaluation || 'none';
+                            const legacyEvalDate = legacyModuleData?.informedEvaluationDate || '';
+                            if (legacyEval !== 'none') {
+                                if (targetMod.informedEvaluation === 'none' || (legacyEvalDate && (!targetMod.informedEvaluationDate || legacyEvalDate > targetMod.informedEvaluationDate))) {
+                                    targetMod.informedEvaluation = legacyEval;
+                                    targetMod.informedEvaluationDate = legacyEvalDate;
+                                }
+                            }
+                        });
+                    });
+                });
+
+                Object.keys(root)
+                    .filter(k => k !== 'students')
+                    .forEach(k => {
+                        if (root[k] && typeof root[k] === 'object' && root[k].students) {
+                            delete root[k];
+                        }
+                    });
+            },
+            getStudentNoticeState(studentName, createIfMissing = false) {
+                const key = this.normalizeStudentKey(studentName);
+                if (!key) return null;
+                const root = this.getGlobalNoticeStore();
+                if (!root.students[key] && createIfMissing) {
+                    root.students[key] = {
+                        name: studentName,
+                        informedMatricula: 'none',
+                        informedMatriculaDate: '',
+                        modules: {}
+                    };
+                }
+                const state = root.students[key] || null;
+                if (state && !state.name) state.name = studentName;
+                return state;
+            },
+            getModuleNoticeState(studentState, moduleName, createIfMissing = false) {
+                if (!studentState) return null;
+                if (!studentState.modules || typeof studentState.modules !== 'object') {
+                    studentState.modules = {};
+                }
+                const key = this.normalizeModuleKey(moduleName);
+                if (!key) return null;
+                if (!studentState.modules[key] && createIfMissing) {
+                    studentState.modules[key] = {
+                        name: moduleName,
+                        informedEvaluation: 'none',
+                        informedEvaluationDate: ''
+                    };
+                }
+                const modState = studentState.modules[key] || null;
+                if (modState && !modState.name) modState.name = moduleName;
+                return modState;
+            },
+            persistNoticeAndLogLocal() {
+                this.saveToLocalStorage('local_notice_states', this.noticeStates);
+                this.saveToLocalStorage('local_action_log', this.actionLog);
+            },
+            requestDriveSync() {
+                if (this.syncDebounceTimer) {
+                    clearTimeout(this.syncDebounceTimer);
+                }
+                this.syncDebounceTimer = setTimeout(() => {
+                    this.syncToDrive();
+                }, 700);
+            },
+            clearLogFilters() {
+                this.logFilters = {
+                    query: '',
+                    student: '',
+                    module: '',
+                    user: '',
+                    action: '',
+                    dateFrom: '',
+                    dateTo: ''
+                };
+            },
+            exportFilteredActionLogCsv() {
+                const rows = this.filteredActionLog || [];
+                if (rows.length === 0) {
+                    this.showWarning('No hay registros para exportar con los filtros actuales.');
+                    return;
+                }
+
+                const escapeCsv = (value) => {
+                    const txt = (value ?? '').toString();
+                    return `"${txt.replace(/"/g, '""')}"`;
+                };
+
+                const headers = ['FechaHora', 'Usuario', 'Accion', 'Alumno', 'Modulo', 'Detalle', 'FechaObjetivo'];
+                const csvLines = [headers.map(escapeCsv).join(',')];
+
+                rows.forEach(entry => {
+                    csvLines.push([
+                        entry.timestamp || '',
+                        entry.user || '',
+                        entry.action || '',
+                        entry.student || '',
+                        entry.module || '',
+                        entry.details || '',
+                        entry.targetDate || ''
+                    ].map(escapeCsv).join(','));
+                });
+
+                const csvContent = `\ufeff${csvLines.join('\n')}`;
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const datePart = new Date().toISOString().slice(0, 10);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `registro_acciones_${datePart}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+
+                this.pushActionLog('Exportación de log CSV', `Registros exportados: ${rows.length}`);
+            },
+            pushActionLog(action, details = '', meta = {}) {
+                const entry = {
+                    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    timestamp: this.getNowIso(),
+                    user: this.currentUserEmail || 'sin_identificar',
+                    action,
+                    details,
+                    student: meta.student || '',
+                    module: meta.module || '',
+                    targetDate: meta.targetDate || ''
+                };
+                this.actionLog.push(entry);
+                if (this.actionLog.length > 1500) {
+                    this.actionLog = this.actionLog.slice(this.actionLog.length - 1500);
+                }
+                this.persistNoticeAndLogLocal();
+                this.requestDriveSync();
+            },
+            promptInstitutionalAccount(force = false) {
+                if (force) this.logoutInstitutionalSession();
+            },
+            applyPersistedNoticesToResults(results) {
+                this.migrateLegacyNoticeStates();
+                const root = this.getGlobalNoticeStore();
+                if (!root || !root.students) return;
+
+                results.forEach(student => {
+                    const studentKey = this.normalizeStudentKey(student.name);
+                    const savedStudent = root.students[studentKey];
+                    if (!savedStudent) return;
+
+                    student.informedMatricula = savedStudent.informedMatricula || 'none';
+                    student.informedMatriculaDate = savedStudent.informedMatriculaDate || '';
+
+                    if (savedStudent.modules && Array.isArray(student.moduleStats)) {
+                        student.moduleStats.forEach(mod => {
+                            const moduleKey = this.normalizeModuleKey(mod.name);
+                            const savedMod = savedStudent.modules[moduleKey];
+                            if (savedMod) {
+                                mod.informedEvaluation = savedMod.informedEvaluation || 'none';
+                                mod.informedEvaluationDate = savedMod.informedEvaluationDate || '';
+                            }
+                        });
+                    }
+                });
+            },
+            onMatriculaNoticeChange(student) {
+                if (this.isAdmin) {
+                    this.showWarning('En modo administrador no se permite editar avisos del alumnado.');
+                    return;
+                }
+                if (!student) return;
+                const state = this.getStudentNoticeState(student.name, true);
+                const now = this.getNowIso();
+
+                state.informedMatricula = student.informedMatricula || 'none';
+                if (state.informedMatricula === 'none') {
+                    state.informedMatriculaDate = '';
+                    student.informedMatriculaDate = '';
+                } else {
+                    state.informedMatriculaDate = now;
+                    student.informedMatriculaDate = now;
+                }
+
+                this.persistNoticeAndLogLocal();
+                this.pushActionLog(
+                    'Actualización aviso matrícula',
+                    `${student.name}: ${state.informedMatricula}`,
+                    { student: student.name, targetDate: state.informedMatriculaDate }
+                );
+            },
+            onModuleNoticeChange(student, mod) {
+                if (this.isAdmin) {
+                    this.showWarning('En modo administrador no se permite editar avisos del alumnado.');
+                    return;
+                }
+                if (!student || !mod) return;
+                const state = this.getStudentNoticeState(student.name, true);
+                const moduleState = this.getModuleNoticeState(state, mod.name, true);
+                const now = this.getNowIso();
+
+                moduleState.informedEvaluation = mod.informedEvaluation || 'none';
+                if (moduleState.informedEvaluation === 'none') {
+                    moduleState.informedEvaluationDate = '';
+                    mod.informedEvaluationDate = '';
+                } else {
+                    moduleState.informedEvaluationDate = now;
+                    mod.informedEvaluationDate = now;
+                }
+
+                this.persistNoticeAndLogLocal();
+                this.pushActionLog(
+                    'Actualización aviso evaluación',
+                    `${student.name} | ${mod.name}: ${moduleState.informedEvaluation}`,
+                    { student: student.name, module: mod.name, targetDate: moduleState.informedEvaluationDate }
+                );
+            },
+            
+            // --- NAVEGACIÓN Y VISTAS ---
+            resetToStep1() {
+                this.step = 1;
+                this.uploadError = null;
+                if(this.$refs.fileInput) this.$refs.fileInput.value = '';
+                this.detectedCourse = '';
+                this.modules = [];
+                this.studentsData = {};
+                this.schedule = {};
+                this.processedResults = [];
+                this.pushActionLog('Reinicio de flujo', 'Se limpió la carga actual de resultados.');
+            },
+
+            toggleAdmin() {
+                if (this.isAdmin) {
+                    this.isAdmin = false;
+                    this.pushActionLog('Modo admin desactivado', 'El usuario salió del modo administrador.');
+                } else {
+                    this.openModal({
+                        title: 'Acceso de Administración',
+                        message: 'Introduce el PIN de administrador para modificar los límites y los calendarios festivos.',
+                        needsInput: true,
+                        inputType: 'password',
+                        icon: 'ph ph-lock-key',
+                        confirmText: 'Desbloquear',
+                        confirmClass: 'bg-indigo-600 hover:bg-indigo-700 text-white',
+                        onConfirm: (pin) => {
+                            if (pin === '1234') { 
+                                this.isAdmin = true;
+                                this.step = 1;
+                                this.pushActionLog('Modo admin activado', 'Acceso al modo administrador con PIN válido.');
+                            } else {
+                                this.showWarning("PIN incorrecto. Acceso denegado.");
+                                this.pushActionLog('Intento admin fallido', 'PIN incorrecto para acceso administrador.');
+                            }
+                        }
+                    });
+                }
+            },
+
+            selectAllToggle() {
+                const list = this.filteredResults || [];
+                if (list.length === 0) return;
+                const anyNotSelected = list.some(s => !s.selectedForPdf);
+                list.forEach(s => s.selectedForPdf = anyNotSelected);
+            },
+            
+            updateCalendarViewToStart() {
+                if (this.config.startDate) {
+                    const parts = this.config.startDate.split('-');
+                    if (parts.length === 3) {
+                        this.currentCalendarYear = parseInt(parts[0]);
+                        this.currentCalendarMonth = parseInt(parts[1]) - 1;
+                    }
+                }
+            },
+
+            // --- AUXILIARES DEL CALENDARIO DINÁMICO MULTIMES ---
+            getBlanksForMonth(year, month) {
+                const firstDay = new Date(year, month, 1);
+                const dayOfWeek = firstDay.getDay(); // 0 Domingo, 1 Lunes...
+                return dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+            },
+            getDaysForMonth(year, month) {
+                const days = [];
+                const totalDays = new Date(year, month + 1, 0).getDate();
+                const startLimit = new Date(this.config.startDate || '1970-01-01');
+                const endLimit = new Date(this.config.endDate || '2099-12-31');
+
+                for (let d = 1; d <= totalDays; d++) {
+                    const currentDate = new Date(year, month, d);
+                    const dayOfWeek = currentDate.getDay();
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    
+                    days.push({
+                        dayNum: d,
+                        dateStr: dateStr,
+                        isWeekend: (dayOfWeek === 0 || dayOfWeek === 6),
+                        isHoliday: this.config.holidays.includes(dateStr),
+                        isOutOfRange: (currentDate < startLimit || currentDate > endLimit)
+                    });
+                }
+                return days;
+            },
+            prevCalendarMonth() {
+                if (this.currentCalendarMonth === 0) {
+                    this.currentCalendarMonth = 11;
+                    this.currentCalendarYear--;
+                } else { this.currentCalendarMonth--; }
+            },
+            nextCalendarMonth() {
+                if (this.currentCalendarMonth === 11) {
+                    this.currentCalendarMonth = 0;
+                    this.currentCalendarYear++;
+                } else { this.currentCalendarMonth++; }
+            },
+
+            toggleCalendarDay(day) {
+                if (!this.isAdmin) return; 
+                if (day.isOutOfRange) return;
+                if (day.isWeekend) {
+                    this.showWarning("Los fines de semana se excluyen automáticamente de los cálculos lectivos.");
+                    return;
+                }
+                if (day.isHoliday) {
+                    this.config.holidays = this.config.holidays.filter(h => h !== day.dateStr);
+                } else {
+                    this.config.holidays.push(day.dateStr);
+                }
+            },
+            getDayClasses(day) {
+                if (day.isOutOfRange) return 'bg-[#03060f] text-slate-600 border border-slate-800 cursor-not-allowed';
+                if (day.isWeekend) return 'bg-[#1e293b]/40 text-slate-500 border border-slate-800 cursor-not-allowed';
+                if (day.isHoliday) return 'bg-red-500/20 text-red-300 border border-red-500/40';
+                return this.isAdmin ? 'bg-[#0d1b35] hover:bg-indigo-500/20 hover:border-indigo-400 text-slate-200 border border-slate-700' : 'bg-[#0d1b35] text-slate-200 border border-slate-700 cursor-default';
+            },
+
+            // --- RESTABLECER FIESTAS POR DEFECTO PARA EL CURSO ACTUAL ---
+            // Se ha eliminado el guardado de festivos por defecto para que el calendario se configure manualmente.
+
+            // --- SINCRONIZACIÓN AUTOMÁTICA CON GOOGLE DRIVE ---
+            async loadFromGoogleDrive() {
+                this.isSyncing = true;
+                try {
+                    const response = await fetch(this.driveUrl);
+                    const data = await response.json();
+                    this.savedCalendars = data.calendars || [];
+                    this.savedSchedules = data.schedules || [];
+                    this.noticeStates = data.noticeStates || {};
+                    this.actionLog = data.actionLog || [];
+                    this.currentUserEmail = data.currentUserEmail || localStorage.getItem('local_current_user') || '';
+                    this.migrateLegacyNoticeStates();
+                    if (data.settings) {
+                        this.settings = { ...this.settings, ...data.settings };
+                    }
+                    
+                            if (this.savedCalendars.length > 0 && !this.selectedCalendarId) {
+                        this.selectedCalendarId = data.settings?.defaultCalendarId || this.savedCalendars[0].id;
+                        this.loadCalendar();
+                    }
+                } catch (e) {
+                    console.error("Error leyendo de Drive:", e);
+                    this.loadFromLocalStorage();
+                } finally {
+                    this.persistNoticeAndLogLocal();
+                    this.isSyncing = false;
+                }
+            },
+
+            async syncToDrive() {
+                if (!this.isUrlConfigured) {
+                    this.saveToLocalStorage('local_calendars', this.savedCalendars);
+                    this.saveToLocalStorage('local_schedules', this.savedSchedules);
+                    this.saveToLocalStorage('local_settings', this.settings);
+                    this.saveToLocalStorage('local_notice_states', this.noticeStates);
+                    this.saveToLocalStorage('local_action_log', this.actionLog);
+                    this.saveToLocalStorage('local_current_user', this.currentUserEmail);
+                    return;
+                }
+                
+                this.isSyncing = true;
+                try {
+                    const payload = {
+                        calendars: this.savedCalendars,
+                        schedules: this.savedSchedules,
+                        settings: this.settings,
+                        noticeStates: this.noticeStates,
+                        actionLog: this.actionLog,
+                        currentUserEmail: this.currentUserEmail
+                    };
+                    
+                    await fetch(this.driveUrl, {
+                        method: 'POST',
+                        mode: 'no-cors', 
+                        headers: {
+                            'Content-Type': 'text/plain;charset=utf-8'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+                } catch(e) {
+                    console.error("Error enviando a Drive:", e);
+                } finally {
+                    this.isSyncing = false;
+                }
+            },
+
+            loadFromLocalStorage() {
+                try {
+                    const cals = localStorage.getItem('local_calendars');
+                    if (cals) this.savedCalendars = JSON.parse(cals);
+                    const scheds = localStorage.getItem('local_schedules');
+                    if (scheds) this.savedSchedules = JSON.parse(scheds);
+                    const sets = localStorage.getItem('local_settings');
+                    if (sets) this.settings = { ...this.settings, ...JSON.parse(sets) };
+                    const notices = localStorage.getItem('local_notice_states');
+                    if (notices) this.noticeStates = JSON.parse(notices);
+                    this.migrateLegacyNoticeStates();
+                    const logs = localStorage.getItem('local_action_log');
+                    if (logs) this.actionLog = JSON.parse(logs);
+                    const user = localStorage.getItem('local_current_user');
+                    if (user) this.currentUserEmail = user;
+
+                    if (this.savedCalendars.length > 0 && !this.selectedCalendarId) {
+                        this.selectedCalendarId = this.settings.defaultCalendarId || this.savedCalendars[0].id;
+                        this.loadCalendar();
+                    }
+                } catch (e) {}
+            },
+            saveToLocalStorage(key, data) {
+                try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) {}
+            },
+
+            saveSettingsToDrive() {
+                this.syncToDrive();
+                this.pushActionLog('Guardado de límites', 'Se guardaron límites de alerta en configuración.');
+                this.showWarning("Límites de faltas actualizados y guardados para todos los profesores.");
+            },
+
+            // --- VENTANAS MODALES ---
+            openModal(options) {
+                this.modal = {
+                    show: true, title: options.title || 'Aviso', message: options.message || '',
+                    needsInput: options.needsInput || false, inputValue: options.inputValue || '', inputType: options.inputType || 'text',
+                    icon: options.icon || 'ph ph-info', confirmText: options.confirmText || 'Aceptar',
+                    confirmClass: options.confirmClass || 'bg-[#0254c7] hover:bg-blue-700 text-white', onConfirm: options.onConfirm
+                };
+            },
+            confirmModal() {
+                if (this.modal.needsInput && !this.modal.inputValue.trim()) return;
+                this.modal.show = false;
+                if (this.modal.onConfirm) this.modal.onConfirm(this.modal.inputValue);
+            },
+            showWarning(msg) {
+                this.openModal({ title: 'Aviso', message: msg, icon: 'ph ph-warning-circle', confirmText: 'Entendido' });
+            },
+
+            // --- GESTIÓN DE CALENDARIOS ---
+            promptSaveCalendar() {
+                const activeCalendar = this.savedCalendars.find(c => c.id === this.selectedCalendarId);
+                const activeName = activeCalendar ? activeCalendar.name : '';
+                this.openModal({
+                    title: 'Guardar calendario de festivos',
+                    message: activeName
+                        ? `Curso activo: ${activeName}. Deja el nombre igual para actualizarlo, o escribe un nombre nuevo para crear otro calendario.`
+                        : 'No hay curso activo seleccionado. Escribe un nombre para crear un nuevo calendario de festivos.',
+                    needsInput: true,
+                    inputValue: activeName || 'Calendario nuevo',
+                    icon: 'ph ph-floppy-disk',
+                    confirmClass: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                    onConfirm: async (name) => {
+                        const trimmedName = name.trim();
+                        if (!trimmedName) {
+                            this.showWarning('Escribe un nombre válido antes de guardar.');
+                            return;
+                        }
+
+                        const cleanId = trimmedName.replace(/[^a-zA-Z0-9-]/g, '_').toLowerCase();
+                        const calendarData = {
+                            id: cleanId,
+                            name: trimmedName,
+                            startDate: this.config.startDate,
+                            endDate: this.config.endDate,
+                            holidays: [...this.config.holidays]
+                        };
+
+                        const existingIndex = this.savedCalendars.findIndex(c => c.id === cleanId);
+                        if (existingIndex >= 0) {
+                            this.savedCalendars[existingIndex] = calendarData;
+                        } else {
+                            this.savedCalendars.push(calendarData);
+                        }
+
+                        this.selectedCalendarId = cleanId;
+                        this.syncToDrive();
+                        this.pushActionLog('Guardado de calendario', `Calendario actualizado: ${trimmedName}`);
+                    }
+                });
+            },
+            setDefaultCalendar() {
+                if (!this.selectedCalendarId) {
+                    this.showWarning('Selecciona primero un calendario para establecerlo como predeterminado.');
+                    return;
+                }
+                this.settings.defaultCalendarId = this.selectedCalendarId;
+                this.syncToDrive();
+                this.pushActionLog('Calendario predeterminado', `ID: ${this.selectedCalendarId}`);
+                this.showWarning('Calendario predeterminado actualizado para todos los usuarios.');
+            },
+            loadCalendar() {
+                if (!this.selectedCalendarId) return;
+                const cal = this.savedCalendars.find(c => c.id === this.selectedCalendarId);
+                if (cal) {
+                    this.config.startDate = cal.startDate;
+                    this.config.endDate = cal.endDate;
+                    this.config.holidays = [...cal.holidays];
+                    this.updateCalendarViewToStart();
+                }
+            },
+            promptDeleteCalendar() {
+                this.openModal({
+                    title: 'Eliminar Calendario',
+                    message: '¿Estás seguro de que deseas eliminar este calendario para todos?',
+                    icon: 'ph ph-trash',
+                    confirmText: 'Eliminar',
+                    confirmClass: 'bg-red-600 hover:bg-red-750 text-white',
+                    onConfirm: async () => {
+                        this.savedCalendars = this.savedCalendars.filter(c => c.id !== this.selectedCalendarId);
+                        this.pushActionLog('Eliminación de calendario', `ID eliminado: ${this.selectedCalendarId}`);
+                        this.selectedCalendarId = '';
+                        this.syncToDrive();
+                    }
+                });
+            },
+
+            // --- GESTIÓN DE HORARIOS ---
+            promptSaveSchedule() {
+                this.openModal({
+                    title: 'Guardar Plantilla de Horas',
+                    message: 'Escribe el nombre del grupo para guardar este horario (ej. "2º DAW"):',
+                    needsInput: true,
+                    inputValue: this.detectedCourse || 'Nuevo Horario',
+                    icon: 'ph ph-clock',
+                    onConfirm: async (name) => {
+                        const cleanId = name.trim().replace(/[^a-zA-Z0-9-]/g, '_').toLowerCase();
+                        const scheduleData = { id: cleanId, name: name.trim(), modules: this.schedule };
+
+                        const existing = this.savedSchedules.findIndex(s => s.id === cleanId);
+                        if (existing >= 0) this.savedSchedules[existing] = scheduleData;
+                        else this.savedSchedules.push(scheduleData);
+                        
+                        this.selectedScheduleId = cleanId;
+                        this.syncToDrive();
+                        this.pushActionLog('Guardado de horario', `Horario actualizado: ${name.trim()}`);
+                    }
+                });
+            },
+            loadSchedule() {
+                if (!this.selectedScheduleId) return;
+                const sched = this.savedSchedules.find(s => s.id === this.selectedScheduleId);
+                if (sched && sched.modules) {
+                    for (const mod of this.modules) {
+                        if (sched.modules[mod]) this.schedule[mod] = { ...sched.modules[mod] };
+                    }
+                }
+            },
+            promptDeleteSchedule() {
+                this.openModal({
+                    title: 'Borrar Plantilla',
+                    message: '¿Deseas eliminar esta plantilla de horario compartida?',
+                    icon: 'ph ph-trash',
+                    confirmText: 'Borrar',
+                    confirmClass: 'bg-red-600 hover:bg-red-750 text-white',
+                    onConfirm: async () => {
+                        this.savedSchedules = this.savedSchedules.filter(s => s.id !== this.selectedScheduleId);
+                        this.pushActionLog('Eliminación de horario', `ID eliminado: ${this.selectedScheduleId}`);
+                        this.selectedScheduleId = '';
+                        this.syncToDrive();
+                    }
+                });
+            },
+
+            // --- PARSEO DEL ARCHIVO EXCEL/CSV ---
+            getWeeklyTotal(mod) {
+                const s = this.schedule[mod];
+                return parseInt(s[1]||0) + parseInt(s[2]||0) + parseInt(s[3]||0) + parseInt(s[4]||0) + parseInt(s[5]||0);
+            },
+            
+            handleFileUpload(event) {
+                this.uploadError = null;
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        
+                        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                        this.parseData(rows);
+                    } catch (error) {
+                        this.uploadError = "Error al leer el archivo. Asegúrate de que no esté protegido o dañado.";
+                        this.$refs.fileInput.value = '';
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            },
+
+            parseData(rows) {
+                let headerRowIdx = -1;
+                let colMap = {};
+                this.detectedCourse = '';
+                this.selectedScheduleId = '';
+                
+                for (let i = 0; i < rows.length; i++) {
+                    const row = rows[i] || [];
+                    if (row.length > 1 && typeof row[0] === 'string' && row[0].includes('Curso:')) {
+                        this.detectedCourse = row[1] ? row[1].toString().trim() : '';
+                    }
+                    if (row.includes('Alumno') && (row.includes('Materia') || row.includes('Materia '))) {
+                        headerRowIdx = i;
+                        row.forEach((colName, idx) => {
+                            if (typeof colName === 'string') colMap[colName.trim()] = idx;
+                        });
+                        break;
+                    }
+                }
+
+                if (headerRowIdx === -1) {
+                    this.uploadError = 'Formato de tabla inválido. El Excel debe contener al menos las cabeceras "Alumno", "Materia" y "Tipo".';
+                    return;
+                }
+
+                const rawModules = new Set();
+                const studentData = {};
+
+                for (let i = headerRowIdx + 1; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || row.length === 0) continue;
+
+                    const alumno = row[colMap['Alumno']];
+                    const materia = row[colMap['Materia']];
+                    let tipo = row[colMap['Tipo']];
+
+                    if (!alumno || !materia) continue;
+                    if (tipo) tipo = tipo.toString().trim().toUpperCase();
+                    if (tipo !== 'A') continue;
+
+                    rawModules.add(materia);
+
+                    if (!studentData[alumno]) studentData[alumno] = { totalAbsences: 0, modules: {} };
+                    if (!studentData[alumno].modules[materia]) studentData[alumno].modules[materia] = 0;
+
+                    studentData[alumno].modules[materia]++;
+                    studentData[alumno].totalAbsences++;
+                }
+
+                if (rawModules.size === 0) {
+                    this.uploadError = 'No se han encontrado ausencias (registros con Tipo "A") en este archivo.';
+                    return;
+                }
+
+                this.modules = Array.from(rawModules).sort();
+                this.studentsData = studentData;
+
+                this.modules.forEach(m => {
+                    this.schedule[m] = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+                });
+
+                if (this.detectedCourse) {
+                    const matchedSched = this.savedSchedules.find(s => s.name.toLowerCase() === this.detectedCourse.toLowerCase());
+                    if (matchedSched) {
+                        this.selectedScheduleId = matchedSched.id;
+                        this.loadSchedule(); 
+                    }
+                }
+
+                this.step = 2;
+                if (this.isAdmin) {
+                    this.pushActionLog('Importación de informe para cuadrante', `Grupo detectado: ${this.detectedCourse || 'sin_grupo'} | Módulos: ${this.modules.length}`);
+                }
+            },
+
+            countDaysBetweenDates(startStr, endStr, targetDayOfWeek, holidaysArr) {
+                if (!startStr || !endStr) return 0;
+                let count = 0;
+                let [sY, sM, sD] = startStr.split('-');
+                let [eY, eM, eD] = endStr.split('-');
+                
+                let currentDate = new Date(sY, sM - 1, sD);
+                let endDate = new Date(eY, eM - 1, eD);
+                let holidaysSet = new Set(holidaysArr);
+
+                let safety = 0;
+                while (currentDate <= endDate && safety < 1000) {
+                    if (currentDate.getDay() === targetDayOfWeek) {
+                        let y = currentDate.getFullYear();
+                        let m = String(currentDate.getMonth() + 1).padStart(2, '0');
+                        let d = String(currentDate.getDate()).padStart(2, '0');
+                        let dateStr = `${y}-${m}-${d}`;
+                        if (!holidaysSet.has(dateStr)) count++;
+                    }
+                    currentDate.setDate(currentDate.getDate() + 1);
+                    safety++;
+                }
+                return count;
+            },
+
+            calculateResults() {
+                if (this.isAdmin) {
+                    this.showWarning('En modo administrador no se permite calcular resultados de alumnado.');
+                    return;
+                }
+                const daysCount = {
+                    1: this.countDaysBetweenDates(this.config.startDate, this.config.endDate, 1, this.config.holidays),
+                    2: this.countDaysBetweenDates(this.config.startDate, this.config.endDate, 2, this.config.holidays),
+                    3: this.countDaysBetweenDates(this.config.startDate, this.config.endDate, 3, this.config.holidays),
+                    4: this.countDaysBetweenDates(this.config.startDate, this.config.endDate, 4, this.config.holidays),
+                    5: this.countDaysBetweenDates(this.config.startDate, this.config.endDate, 5, this.config.holidays),
+                };
+
+                const modTotalHours = {};
+                let courseTotalHours = 0;
+
+                this.modules.forEach(mod => {
+                    let totalMod = 0;
+                    [1, 2, 3, 4, 5].forEach(day => {
+                        totalMod += (daysCount[day] * parseInt(this.schedule[mod][day] || 0));
+                    });
+                    modTotalHours[mod] = totalMod;
+                    courseTotalHours += totalMod;
+                });
+
+                this.totalCourseHours = courseTotalHours;
+
+                if (courseTotalHours === 0) {
+                    this.showWarning("El cómputo de horas totales del curso es cero. Por favor, asegúrate de haber rellenado el horario semanal y que haya días lectivos entre la fecha de inicio y de fin.");
+                    return;
+                }
+
+                const results = [];
+                for (const [studentName, data] of Object.entries(this.studentsData)) {
+                    let modStats = [];
+                    let modulosPerdidos = [];
+                    let modulosAviso = [];
+
+                    this.modules.forEach(mod => {
+                        const absences = data.modules[mod] || 0;
+                        const totalHours = modTotalHours[mod] || 0;
+                        let percent = 0;
+
+                        if (totalHours > 0) percent = (absences / totalHours) * 100;
+
+                        const pierde = percent > this.settings.thresholdEval;
+                        const aviso = percent > this.settings.thresholdEvalWarning && percent <= this.settings.thresholdEval;
+                        
+                        if (pierde) {
+                            modulosPerdidos.push(mod);
+                        } else if (aviso) {
+                            modulosAviso.push(mod);
+                        }
+
+                        modStats.push({
+                            name: mod, absences: absences, totalHours: totalHours,
+                            percent: percent.toFixed(1), pierde: pierde, aviso: aviso,
+                            informedEvaluation: 'none'
+                        });
+                    });
+
+                    let totalPercent = 0;
+                    if (this.totalCourseHours > 0) totalPercent = (data.totalAbsences / this.totalCourseHours) * 100;
+
+                    const pierdeMatricula = totalPercent > this.settings.thresholdMatricula;
+                    const avisoMatricula = totalPercent > this.settings.thresholdMatriculaWarning && totalPercent <= this.settings.thresholdMatricula;
+
+                    results.push({
+                        name: studentName, totalAbsences: data.totalAbsences,
+                        totalPercent: totalPercent.toFixed(1),
+                        pierdeMatricula: pierdeMatricula,
+                        avisoMatricula: avisoMatricula,
+                        moduleStats: modStats,
+                        modulosPerdidos: modulosPerdidos,
+                        modulosAviso: modulosAviso,
+                        // Estados de notificación por alumno (editable manualmente)
+                        informedMatricula: 'none', // 'none' | '50' | '100'
+                        // informedEvaluacion removed; per-module evaluation notifications are used instead
+                        selectedForPdf: false
+                    });
+                }
+
+                results.sort((a, b) => a.name.localeCompare(b.name));
+                this.applyPersistedNoticesToResults(results);
+                this.processedResults = results;
+                this.step = 3;
+                this.pushActionLog('Cálculo de absentismo', `Alumnos procesados: ${results.length}`);
+            },
+            // Removed toggleInformado: per-module evaluation notification is editable via select `mod.informedEvaluation`.
+            async generateAbsentismoPdfs() {
+                if (this.isAdmin) {
+                    this.showWarning('En modo administrador no se permite generar informes de alumnado.');
+                    return;
+                }
+                if (!this.processedResults || this.processedResults.length === 0) {
+                    this.showWarning('No hay resultados disponibles para generar los informes.');
+                    return;
+                }
+
+                if (!window.jspdf || !window.jspdf.jsPDF) {
+                    this.showWarning('No se ha podido cargar jsPDF. Comprueba la conexión a Internet o la librería incluida.');
+                    return;
+                }
+
+                // Seleccionar solo el alumnado marcado para exportar
+                const targets = (this.processedResults || []).filter(s => s.selectedForPdf);
+                if (targets.length === 0) {
+                    this.showWarning('Selecciona al menos un alumno para generar los PDFs.');
+                    return;
+                }
+
+                // Intentar cargar el logo para la cabecera y obtener sus dimensiones
+                const logoUrl = 'https://lh3.googleusercontent.com/u/0/d/1Y7DoPThxj9v0KH3ttMdoBh2cWKfgPe8Z';
+                const fetchImageAsDataUrl = async (url) => {
+                    try {
+                        const resp = await fetch(url);
+                        const blob = await resp.blob();
+                        return await new Promise((res, rej) => {
+                            const reader = new FileReader();
+                            reader.onload = () => res(reader.result);
+                            reader.onerror = () => rej('image_read_error');
+                            reader.readAsDataURL(blob);
+                        });
+                    } catch (e) {
+                        return null;
+                    }
+                };
+
+                const logoDataUrl = await fetchImageAsDataUrl(logoUrl);
+                let logoDims = null;
+                if (logoDataUrl) {
+                    await new Promise((res) => {
+                        const img = new Image();
+                        img.onload = () => { logoDims = { w: img.naturalWidth, h: img.naturalHeight }; res(); };
+                        img.onerror = () => res();
+                        img.src = logoDataUrl;
+                    });
+                }
+
+                const genDate = new Date();
+                const genDateStr = genDate.toLocaleString();
+
+                const zip = (window.JSZip) ? new window.JSZip() : null;
+                if (!zip) {
+                    this.showWarning('No se ha cargado JSZip. Comprueba la conexión o la inclusión de la librería.');
+                    return;
+                }
+
+                for (const student of targets) {
+                    const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+                    const margin = 40;
+                    let y = margin;
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+                    const lineHeight = 14; // altura de línea base
+
+                    // Cabecera: logo manteniendo relación de aspecto y título del centro
+                    if (logoDataUrl && logoDims) {
+                        try {
+                            const maxImgW = 80;
+                            const aspect = logoDims.w / (logoDims.h || 1);
+                            const imgW = Math.min(maxImgW, logoDims.w);
+                            const imgH = imgW / aspect;
+                            doc.addImage(logoDataUrl, 'JPEG', margin, y, imgW, imgH);
+                            const headerX = margin + imgW + 12;
+                            doc.setFontSize(14);
+                            doc.setFont('helvetica', 'bold');
+                            doc.text('Centro Sagrado Corazón APP', headerX, y + (imgH / 2) - 6);
+                            doc.setFontSize(9);
+                            doc.setFont('helvetica', 'normal');
+                            doc.text(`Fecha de generación: ${genDateStr}`, headerX, y + (imgH / 2) + 10);
+                            y += imgH + 12;
+                        } catch (e) {
+                            // fallback
+                            doc.setFontSize(14);
+                            doc.setFont('helvetica', 'bold');
+                            doc.text('Centro Sagrado Corazón APP', margin, y + 20);
+                            doc.setFontSize(9);
+                            doc.setFont('helvetica', 'normal');
+                            doc.text(`Fecha de generación: ${genDateStr}`, margin, y + 38);
+                            y += 60;
+                        }
+                    } else {
+                        doc.setFontSize(14);
+                        doc.setFont('helvetica', 'bold');
+                        doc.text('Centro Sagrado Corazón APP', margin, y + 20);
+                        doc.setFontSize(9);
+                        doc.setFont('helvetica', 'normal');
+                        doc.text(`Fecha de generación: ${genDateStr}`, margin, y + 38);
+                        y += 60;
+                    }
+
+                    // Bloque 1: Absentismo total
+                    doc.setFontSize(12);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Absentismo total', margin, y);
+                    y += lineHeight + 4;
+
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(10);
+                    doc.text(`Período: ${this.config.startDate || 'N/A'} a ${this.config.endDate || 'N/A'}`, margin, y);
+                    y += lineHeight;
+                    doc.text(`Total de horas lectivas del curso: ${this.totalCourseHours}`, margin, y);
+                    y += lineHeight;
+                    doc.text(`Faltas totales: ${student.totalAbsences}`, margin, y);
+                    y += lineHeight;
+                    doc.text(`Porcentaje total: ${student.totalPercent}%`, margin, y);
+                    y += lineHeight;
+
+                    // Estado y notificaciones de matrícula
+                    const matThreshold = Number(this.settings.thresholdMatricula) || 0;
+                    const totalPct = Number(student.totalPercent) || 0;
+
+                    // Estado formal del absentismo total (informativo)
+                    let matriculaSituation = '';
+                    if (matThreshold > 0 && totalPct > matThreshold) {
+                        matriculaSituation = `Ha superado el ${matThreshold}% de faltas permitidas. En consecuencia, la matrícula se considera perdida.`;
+                    } else if (matThreshold > 0 && totalPct > (matThreshold * 0.5)) {
+                        matriculaSituation = `Ha superado el 50% del límite de faltas permitido (${(matThreshold * 0.5).toFixed(1)}%). Se emite un pre-aviso.`;
+                    } else {
+                        matriculaSituation = 'La asistencia se encuentra dentro de los límites establecidos. No procede la pérdida de matrícula.';
+                    }
+
+                    // Notificaciones explícitas (firma/registro) según selección manual del profesor
+                    const infoMat = student.informedMatricula || 'none';
+                    let matriculaNotify = '';
+                    if (infoMat === 'none') matriculaNotify = 'No se ha emitido notificación respecto a la matrícula.';
+                    else if (infoMat === '50') matriculaNotify = 'Se ha comunicado un pre-aviso relativo a la matrícula, por haber superado el 50% de las faltas permitidas.';
+                    else if (infoMat === '100') matriculaNotify = 'Se ha comunicado un aviso formal relativo a la matrícula, por haber superado el 100% de las faltas permitidas.';
+
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Estado de matrícula:', margin, y);
+                    y += lineHeight;
+                    doc.setFont('helvetica', 'normal');
+                    const situLines = doc.splitTextToSize(matriculaSituation, pageWidth - margin * 2);
+                    doc.text(situLines, margin, y);
+                    y += situLines.length * lineHeight + 4;
+                    const notifyLines = doc.splitTextToSize(matriculaNotify, pageWidth - margin * 2);
+                    doc.text(notifyLines, margin, y);
+                    y += notifyLines.length * lineHeight + 6;
+
+                    // Bloque 2: Detalle por módulo (tabla con wrapping)
+                    doc.setFontSize(12);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Detalle por módulo', margin, y);
+                    y += lineHeight + 6;
+
+                    // Column layout
+                    const colX = [margin, margin + 220, margin + 320, margin + 380, margin + 430];
+                    const colWidths = [200, 60, 50, 40, 60];
+
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'bold');
+                    const headers = ['Módulo', 'Faltas', 'Horas', '%', 'Informe'];
+                    headers.forEach((h, i) => doc.text(h, colX[i], y));
+                    y += lineHeight;
+                    doc.setDrawColor(150);
+                    doc.setLineWidth(0.5);
+                    doc.line(margin, y, pageWidth - margin, y);
+                    y += 8;
+
+                    doc.setFont('helvetica', 'normal');
+
+                    for (const mod of student.moduleStats) {
+                        // Preparar líneas para celdas que puedan romper
+                        const nameLines = doc.splitTextToSize(mod.name || '', colWidths[0]);
+                        const evalState = mod.informedEvaluation || 'none';
+                        let infoText = 'No';
+                        if (evalState === '50') infoText = 'Aviso 50%';
+                        else if (evalState === '100') infoText = 'Aviso 100%';
+                        const infoLines = doc.splitTextToSize(infoText, colWidths[4]);
+
+                        const cellLineCount = Math.max(nameLines.length, infoLines.length, 1);
+                        const rowHeight = cellLineCount * lineHeight + 4;
+
+                        if (y + rowHeight > pageHeight - margin) {
+                            doc.addPage();
+                            y = margin;
+                        }
+
+                        // Nombre (multilínea)
+                        doc.text(nameLines, colX[0], y + 2);
+
+                        // Otros campos en la primera línea del bloque
+                        doc.text(String(mod.absences), colX[1], y + 2);
+                        doc.text(String(mod.totalHours), colX[2], y + 2);
+                        doc.text(`${mod.percent}%`, colX[3], y + 2);
+                        doc.text(infoLines, colX[4], y + 2);
+
+                        y += rowHeight;
+                    }
+
+                    y += 8;
+
+                    // Bloque 3: Resumen matrícula y evaluación continua
+                    if (y + 80 > pageHeight - margin) {
+                        doc.addPage();
+                        y = margin;
+                    }
+
+                    doc.setFontSize(12);
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Resumen de Matrícula y Evaluación', margin, y);
+                    y += lineHeight + 4;
+
+                    doc.setFontSize(10);
+                    doc.setFont('helvetica', 'normal');
+
+                    // Redacción formal sobre la matrícula
+                    const formalMatLines = doc.splitTextToSize(`En relación con la matrícula: ${matriculaSituation}`, pageWidth - margin * 2);
+                    doc.text(formalMatLines, margin, y);
+                    y += formalMatLines.length * lineHeight + 6;
+
+                    // Incluir notificación de matrícula (si procede)
+                    const formalNotifyMat = doc.splitTextToSize(`Notificación enviada: ${matriculaNotify}`, pageWidth - margin * 2);
+                    doc.text(formalNotifyMat, margin, y);
+                    y += formalNotifyMat.length * lineHeight + 8;
+
+                    // Si la matrícula se ha perdido, no se informa de la evaluación contínua en el resumen
+                    if (student.pierdeMatricula) {
+                        const skipMsg = 'Dado que la matrícula se ha perdido, en este resumen no se detallará la evaluación continua.';
+                        const skipLines = doc.splitTextToSize(skipMsg, pageWidth - margin * 2);
+                        doc.text(skipLines, margin, y);
+                        y += skipLines.length * lineHeight + 6;
+                    } else {
+                        // Notificación de evaluación contínua según selección manual
+                        // Determinar notificación de evaluación contínua a nivel de módulos
+                        const infoEval = (student.moduleStats && student.moduleStats.some(m => m.informedEvaluation === '100')) ? '100' :
+                                         (student.moduleStats && student.moduleStats.some(m => m.informedEvaluation === '50')) ? '50' : 'none';
+                        let evalNotify = '';
+                        if (infoEval === 'none') evalNotify = 'No se ha emitido notificación relativa a la evaluación continua.';
+                        else if (infoEval === '50') evalNotify = 'Se ha comunicado un pre-aviso relativo a la evaluación continua (50% de faltas permitidas superado).';
+                        else if (infoEval === '100') evalNotify = 'Se ha comunicado un aviso formal relativo a la evaluación continua (100% de faltas permitidas superado).';
+
+                        const formalEvalLines = doc.splitTextToSize(`Notificación evaluación continua: ${evalNotify}`, pageWidth - margin * 2);
+                        doc.text(formalEvalLines, margin, y);
+                        y += formalEvalLines.length * lineHeight + 6;
+
+                        // Información sobre pérdida de evaluación continua en módulos
+                        if (student.modulosPerdidos && student.modulosPerdidos.length > 0) {
+                            const modList = student.modulosPerdidos.join(', ');
+                            const evalMsg = `Ha perdido la evaluación continua en los siguientes módulos: ${modList}.`;
+                            const evalLines = doc.splitTextToSize(evalMsg, pageWidth - margin * 2);
+                            doc.text(evalLines, margin, y);
+                            y += evalLines.length * lineHeight + 6;
+                        } else {
+                            const okMsg = 'No se han detectado pérdidas de evaluación continua en los módulos.';
+                            const okLines = doc.splitTextToSize(okMsg, pageWidth - margin * 2);
+                            doc.text(okLines, margin, y);
+                            y += okLines.length * lineHeight + 6;
+                        }
+                    }
+
+                    // Generar blob del PDF y añadirlo al ZIP
+                    const filename = `Absentismo_${student.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+                    try {
+                        const pdfBlob = doc.output('blob');
+                        zip.file(filename, pdfBlob);
+                    } catch (e) {
+                        // fallback: intentar arraybuffer
+                        try {
+                            const arr = doc.output('arraybuffer');
+                            zip.file(filename, arr);
+                        } catch (ee) {}
+                    }
+
+                    // No se cambia automáticamente el estado de notificación por módulo; queda editable manualmente.
+                }
+                // Generar ZIP y forzar descarga
+                try {
+                    const zipBlob = await zip.generateAsync({ type: 'blob' });
+                    const zipName = `Absentismo_Informes_${new Date().toISOString().slice(0,10)}.zip`;
+                    const url = URL.createObjectURL(zipBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = zipName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error('Error generando ZIP:', e);
+                    this.showWarning('Se produjó un error al generar el ZIP de informes.');
+                    return;
+                }
+
+                this.showWarning('Se han generado los informes PDF y descargado en un ZIP. Los módulos han sido marcados como informados.');
+                this.pushActionLog('Generación de informes PDF', `Informes generados para ${targets.length} alumno(s).`);
+            }
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
