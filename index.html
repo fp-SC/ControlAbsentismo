@@ -757,7 +757,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
     // =========================================================================
     // ⚙️ CONFIGURACIÓN AUTOMÁTICA DE GOOGLE DRIVE ⚙️
     // =========================================================================
-    const URL_DEL_SCRIPT = "https://script.google.com/macros/s/AKfycbyuCibhfR0ZkpurMRCKx5HYxm8uHo2ksN7Z9_3Ox8kWu2RStyxt5TSTg2ruoSWRQW4O9w/exec";
+    const URL_DEL_SCRIPT = "https://script.google.com/macros/s/AKfycbyZ_JfFkYu2zEY2zP6HxgvQPPeKeFk-GJqcXe4Qc-ibgBS7NUfmoo2P-5kxsBccBG1xdw/exec";
     // =========================================================================
 
     const { createApp } = Vue;
@@ -1230,6 +1230,15 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 this.saveToLocalStorage('local_notice_states', this.noticeStates);
                 this.saveToLocalStorage('local_action_log', this.actionLog);
             },
+            persistRemoteSnapshotLocal() {
+                this.saveToLocalStorage('local_calendars', this.savedCalendars);
+                this.saveToLocalStorage('local_schedules', this.savedSchedules);
+                this.saveToLocalStorage('local_settings', this.settings);
+                this.saveToLocalStorage('local_notice_states', this.noticeStates);
+                this.saveToLocalStorage('local_action_log', this.actionLog);
+                this.saveToLocalStorage('local_current_user', this.currentUserEmail);
+                this.saveToLocalStorage('local_access_control', this.accessControl);
+            },
             requestDriveSync() {
                 if (this.isHydratingRemoteData) {
                     this.pendingSyncAfterHydration = true;
@@ -1550,8 +1559,18 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         return;
                     }
 
-                    const requestUrl = `${this.driveUrl}?idToken=${encodeURIComponent(idToken)}&t=${Date.now()}`;
-                    const response = await fetch(requestUrl);
+                    const response = await fetch(this.driveUrl, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: {
+                            'Content-Type': 'text/plain;charset=utf-8'
+                        },
+                        body: JSON.stringify({
+                            action: 'read',
+                            idToken,
+                            t: Date.now()
+                        })
+                    });
                     const data = await response.json();
 
                     if (!data.success) {
@@ -1572,6 +1591,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     if (data.settings) {
                         this.settings = { ...this.settings, ...data.settings };
                     }
+                    this.persistRemoteSnapshotLocal();
                     
                             if (this.savedCalendars.length > 0 && !this.selectedCalendarId) {
                         this.selectedCalendarId = data.settings?.defaultCalendarId || this.savedCalendars[0].id;
