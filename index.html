@@ -812,6 +812,8 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     dateTo: ''
                 },
                 syncDebounceTimer: null,
+                isHydratingRemoteData: false,
+                pendingSyncAfterHydration: false,
 
                 modules: [],
                 studentsData: {}, 
@@ -996,7 +998,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 if (errorCode === 'INVALID_DOMAIN' || errorCode === 'INVALID_HOSTED_DOMAIN') return `Acceso denegado. Usa una cuenta @${this.institutionalDomain}.`;
                 return 'No se pudo validar el acceso en servidor.';
             },
-            handleGoogleCredentialResponse(response) {
+            async handleGoogleCredentialResponse(response) {
                 const credential = response && response.credential ? response.credential : '';
                 const check = this.validateInstitutionalCredential(credential);
                 if (!check.valid) {
@@ -1015,14 +1017,14 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 localStorage.setItem('sc_id_token', credential);
                 this.saveToLocalStorage('local_current_user', this.currentUserEmail);
 
-                if (previous !== this.currentUserEmail) {
-                    this.pushActionLog('Inicio de sesión de usuario', `Usuario activo: ${this.currentUserEmail}`);
-                }
-
                 if (this.isUrlConfigured) {
-                    this.loadFromGoogleDrive();
+                    await this.loadFromGoogleDrive();
                 } else {
                     this.loadFromLocalStorage();
+                }
+
+                if (previous !== this.currentUserEmail) {
+                    this.pushActionLog('Inicio de sesión de usuario', `Usuario activo: ${this.currentUserEmail}`);
                 }
             },
             renderGoogleLoginButton() {
@@ -1229,6 +1231,10 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 this.saveToLocalStorage('local_action_log', this.actionLog);
             },
             requestDriveSync() {
+                if (this.isHydratingRemoteData) {
+                    this.pendingSyncAfterHydration = true;
+                    return;
+                }
                 if (this.syncDebounceTimer) {
                     clearTimeout(this.syncDebounceTimer);
                 }
@@ -1534,6 +1540,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
 
             // --- SINCRONIZACIÓN AUTOMÁTICA CON GOOGLE DRIVE ---
             async loadFromGoogleDrive() {
+                this.isHydratingRemoteData = true;
                 this.isSyncing = true;
                 try {
                     const idToken = this.getStoredIdToken();
@@ -1583,6 +1590,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 } finally {
                     this.persistNoticeAndLogLocal();
                     this.isSyncing = false;
+                    this.isHydratingRemoteData = false;
+                    if (this.pendingSyncAfterHydration) {
+                        this.pendingSyncAfterHydration = false;
+                        this.requestDriveSync();
+                    }
                 }
             },
 
