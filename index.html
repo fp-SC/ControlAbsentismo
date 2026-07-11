@@ -125,6 +125,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             </div>
         </header>
 
+        <div v-if="lastSyncError" class="bg-amber-950/40 border border-amber-700/60 text-amber-200 rounded-xl p-3 mb-4 text-xs">
+            <div class="font-bold mb-1">Diagnostico de sincronizacion</div>
+            <div>{{ lastSyncError }}</div>
+        </div>
+
         <!-- Aviso si falta la URL del Script -->
         <div v-if="!isUrlConfigured" class="bg-red-950/40 border-2 border-red-800/80 p-4 rounded-xl flex items-start gap-3 mb-6 shadow-2xl text-red-200 backdrop-blur-md">
             <i class="ph ph-warning-octagon text-red-500 text-3xl flex-shrink-0"></i>
@@ -815,6 +820,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 syncDebounceTimer: null,
                 isHydratingRemoteData: false,
                 pendingSyncAfterHydration: false,
+                lastSyncError: '',
 
                 modules: [],
                 studentsData: {}, 
@@ -1567,6 +1573,18 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             // Se ha eliminado el guardado de festivos por defecto para que el calendario se configure manualmente.
 
             // --- SINCRONIZACIÓN AUTOMÁTICA CON GOOGLE DRIVE ---
+            async fetchJsonFromResponse(response) {
+                const text = await response.text();
+                try {
+                    return JSON.parse(text || '{}');
+                } catch (error) {
+                    return {
+                        success: false,
+                        error: `NON_JSON_RESPONSE_${response.status}`,
+                        raw: (text || '').slice(0, 240)
+                    };
+                }
+            },
             async readDriveSnapshot(idToken) {
                 const postResponse = await fetch(this.driveUrl, {
                     method: 'POST',
@@ -1581,7 +1599,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     })
                 });
 
-                const postData = await postResponse.json();
+                const postData = await this.fetchJsonFromResponse(postResponse);
                 const hasSnapshot = postData
                     && postData.success
                     && Array.isArray(postData.calendars)
@@ -1599,10 +1617,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     method: 'GET',
                     mode: 'cors'
                 });
-                const getData = await getResponse.json();
+                const getData = await this.fetchJsonFromResponse(getResponse);
 
                 if (!getData.success) {
-                    throw new Error(getData.error || 'READ_FAILED');
+                    const debug = getData.raw ? ` | RAW: ${getData.raw}` : '';
+                    throw new Error((getData.error || 'READ_FAILED') + debug);
                 }
 
                 return getData;
@@ -1610,6 +1629,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
             async loadFromGoogleDrive() {
                 this.isHydratingRemoteData = true;
                 this.isSyncing = true;
+                this.lastSyncError = '';
                 try {
                     const idToken = this.getStoredIdToken();
                     if (!idToken) {
@@ -1636,6 +1656,10 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         this.settings = { ...this.settings, ...data.settings };
                     }
                     this.persistRemoteSnapshotLocal();
+
+                    if (this.savedCalendars.length === 0 && this.savedSchedules.length === 0) {
+                        this.lastSyncError = 'Lectura remota correcta, pero el servidor devolvio 0 calendarios y 0 horarios.';
+                    }
                     
                     const hasSelected = this.savedCalendars.some(c => c.id === this.selectedCalendarId);
                     if (this.savedCalendars.length > 0 && !hasSelected) {
@@ -1645,6 +1669,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 } catch (e) {
                     console.error("Error leyendo de Drive:", e);
                     const serverError = (e && e.message) ? e.message : '';
+                    this.lastSyncError = `Fallo leyendo Drive: ${serverError || 'ERROR_DESCONOCIDO'}`;
                     const authErrors = ['EMAIL_NOT_ALLOWED', 'TOKEN_REQUIRED', 'INVALID_TOKEN', 'UNVERIFIED_EMAIL', 'INVALID_DOMAIN', 'INVALID_HOSTED_DOMAIN'];
                     if (authErrors.includes(serverError)) {
                         this.logoutInstitutionalSession();
