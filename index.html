@@ -1697,11 +1697,13 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     this.saveToLocalStorage('local_action_log', this.actionLog);
                     this.saveToLocalStorage('local_current_user', this.currentUserEmail);
                     this.saveToLocalStorage('local_access_control', this.accessControl);
-                    return;
+                    this.lastSyncError = '';
+                    return true;
                 }
                 
                 this.isSyncing = true;
                 try {
+                    this.lastSyncError = '';
                     const payload = {
                         calendars: this.savedCalendars,
                         schedules: this.savedSchedules,
@@ -1722,17 +1724,22 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         body: JSON.stringify(payload)
                     });
 
-                    const data = await response.json();
+                    const data = await this.fetchJsonFromResponse(response);
                     if (!data.success) {
-                        throw new Error(data.error || 'WRITE_FAILED');
+                        const debug = data.raw ? ` | RAW: ${data.raw}` : '';
+                        throw new Error((data.error || 'WRITE_FAILED') + debug);
                     }
+                    this.persistRemoteSnapshotLocal();
+                    return true;
                 } catch(e) {
                     console.error("Error enviando a Drive:", e);
                     const code = (e && e.message) ? e.message : '';
+                    this.lastSyncError = `Fallo guardando en Drive: ${code || 'WRITE_FAILED'}`;
                     if (code === 'EMAIL_NOT_ALLOWED' || code === 'TOKEN_REQUIRED' || code === 'INVALID_TOKEN' || code === 'INVALID_DOMAIN' || code === 'INVALID_HOSTED_DOMAIN') {
                         this.logoutInstitutionalSession();
                         this.authError = this.mapServerAuthError(code);
                     }
+                    return false;
                 } finally {
                     this.isSyncing = false;
                 }
@@ -1887,8 +1894,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         else this.savedSchedules.push(scheduleData);
                         
                         this.selectedScheduleId = cleanId;
-                        this.syncToDrive();
+                        const saved = await this.syncToDrive();
                         this.pushActionLog('Guardado de horario', `Horario actualizado: ${name.trim()}`);
+                        if (saved) {
+                            this.showWarning('Horario guardado correctamente para todos los usuarios.');
+                        }
                     }
                 });
             },
