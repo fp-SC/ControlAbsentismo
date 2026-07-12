@@ -1023,8 +1023,25 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 if (errorCode === 'EMAIL_NOT_ALLOWED') return 'Tu cuenta no tiene permiso para usar esta aplicación. Contacta con administración.';
                 if (errorCode === 'TOKEN_REQUIRED') return 'Sesión caducada. Inicia sesión de nuevo.';
                 if (errorCode === 'INVALID_TOKEN' || errorCode === 'UNVERIFIED_EMAIL') return 'No se pudo validar tu identidad. Vuelve a iniciar sesión.';
+                if (errorCode === 'TOKENINFO_HTTP_400' || errorCode === 'TOKENINFO_PARSE') return 'Tu sesión ha caducado o no es válida. Inicia sesión de nuevo.';
                 if (errorCode === 'INVALID_DOMAIN' || errorCode === 'INVALID_HOSTED_DOMAIN') return `Acceso denegado. Usa una cuenta @${this.institutionalDomain}.`;
                 return 'No se pudo validar el acceso en servidor.';
+            },
+            extractServerErrorCode(message) {
+                const text = (message || '').toString().trim();
+                if (!text) return '';
+                return text.split('|')[0].trim();
+            },
+            isSessionTokenError(errorCode) {
+                return [
+                    'TOKEN_REQUIRED',
+                    'INVALID_TOKEN',
+                    'UNVERIFIED_EMAIL',
+                    'INVALID_DOMAIN',
+                    'INVALID_HOSTED_DOMAIN',
+                    'TOKENINFO_HTTP_400',
+                    'TOKENINFO_PARSE'
+                ].includes(errorCode);
             },
             async handleGoogleCredentialResponse(response) {
                 const credential = response && response.credential ? response.credential : '';
@@ -1483,13 +1500,15 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 this.pushActionLog('Baja en allowlist', `Correo eliminado: ${email}`);
             },
 
-            saveAllowedEmails() {
+            async saveAllowedEmails() {
                 if (!this.isAdmin) {
                     this.showWarning('Solo administradores pueden guardar la lista de acceso.');
                     return;
                 }
-                this.syncToDrive();
-                this.showWarning('Lista de correos permitidos guardada correctamente.');
+                const saved = await this.syncToDrive();
+                if (saved) {
+                    this.showWarning('Lista de correos permitidos guardada correctamente.');
+                }
             },
 
             selectAllToggle() {
@@ -1668,10 +1687,10 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     }
                 } catch (e) {
                     console.error("Error leyendo de Drive:", e);
-                    const serverError = (e && e.message) ? e.message : '';
+                    const rawError = (e && e.message) ? e.message : '';
+                    const serverError = this.extractServerErrorCode(rawError);
                     this.lastSyncError = `Fallo leyendo Drive: ${serverError || 'ERROR_DESCONOCIDO'}`;
-                    const authErrors = ['EMAIL_NOT_ALLOWED', 'TOKEN_REQUIRED', 'INVALID_TOKEN', 'UNVERIFIED_EMAIL', 'INVALID_DOMAIN', 'INVALID_HOSTED_DOMAIN'];
-                    if (authErrors.includes(serverError)) {
+                    if (serverError === 'EMAIL_NOT_ALLOWED' || this.isSessionTokenError(serverError)) {
                         this.logoutInstitutionalSession();
                         this.authError = this.mapServerAuthError(serverError);
                         return;
@@ -1704,6 +1723,11 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 this.isSyncing = true;
                 try {
                     this.lastSyncError = '';
+                    const idToken = this.getStoredIdToken();
+                    if (!idToken) {
+                        throw new Error('TOKEN_REQUIRED');
+                    }
+
                     const payload = {
                         calendars: this.savedCalendars,
                         schedules: this.savedSchedules,
@@ -1712,7 +1736,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         actionLog: this.actionLog,
                         currentUserEmail: this.currentUserEmail,
                         accessControl: this.accessControl,
-                        idToken: this.getStoredIdToken()
+                        idToken
                     };
                     
                     const response = await fetch(this.driveUrl, {
@@ -1733,9 +1757,10 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     return true;
                 } catch(e) {
                     console.error("Error enviando a Drive:", e);
-                    const code = (e && e.message) ? e.message : '';
+                    const rawCode = (e && e.message) ? e.message : '';
+                    const code = this.extractServerErrorCode(rawCode);
                     this.lastSyncError = `Fallo guardando en Drive: ${code || 'WRITE_FAILED'}`;
-                    if (code === 'EMAIL_NOT_ALLOWED' || code === 'TOKEN_REQUIRED' || code === 'INVALID_TOKEN' || code === 'INVALID_DOMAIN' || code === 'INVALID_HOSTED_DOMAIN') {
+                    if (code === 'EMAIL_NOT_ALLOWED' || this.isSessionTokenError(code)) {
                         this.logoutInstitutionalSession();
                         this.authError = this.mapServerAuthError(code);
                     }
