@@ -381,6 +381,26 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         </label>
 
                         <p v-if="uploadError" class="text-red-400 mt-3 text-sm font-bold bg-red-950/30 p-2 rounded-lg border border-red-800/40"><i class="ph ph-warning-circle inline align-middle text-lg"></i> {{ uploadError }}</p>
+
+                        <div class="mt-5 pt-4 border-t border-slate-800 space-y-2">
+                            <h3 class="text-sm font-bold text-white">Editar cuadrantes ya guardados</h3>
+                            <p class="text-xs text-slate-400">Selecciona un cuadrante existente para abrirlo directamente en el editor de horas.</p>
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <select v-model="selectedScheduleId" class="flex-1 text-xs border border-slate-700 rounded-lg py-2 px-2.5 focus:ring-blue-500 bg-[#0d1b35] text-slate-100 font-medium cursor-pointer outline-none">
+                                    <option value="">-- Selecciona un cuadrante guardado --</option>
+                                    <option v-for="sched in savedSchedules" :key="sched.id" :value="sched.id">{{ sched.name }}</option>
+                                </select>
+                                <button
+                                    type="button"
+                                    @click="openSavedScheduleEditor"
+                                    :disabled="!selectedScheduleId || savedSchedules.length === 0"
+                                    class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    Abrir editor
+                                </button>
+                            </div>
+                            <p v-if="savedSchedules.length === 0" class="text-[11px] text-slate-500">Todavía no hay cuadrantes guardados.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1931,10 +1951,63 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 if (!this.selectedScheduleId) return;
                 const sched = this.savedSchedules.find(s => s.id === this.selectedScheduleId);
                 if (sched && sched.modules) {
+                    const moduleNames = Object.keys(sched.modules || {}).sort((a, b) => a.localeCompare(b));
+                    if (moduleNames.length > 0 && this.modules.length === 0) {
+                        this.modules = moduleNames;
+                    }
                     for (const mod of this.modules) {
-                        if (sched.modules[mod]) this.schedule[mod] = { ...sched.modules[mod] };
+                        if (sched.modules[mod]) {
+                            const source = sched.modules[mod] || {};
+                            this.schedule[mod] = {
+                                1: parseInt(source[1] ?? source['1'] ?? 0),
+                                2: parseInt(source[2] ?? source['2'] ?? 0),
+                                3: parseInt(source[3] ?? source['3'] ?? 0),
+                                4: parseInt(source[4] ?? source['4'] ?? 0),
+                                5: parseInt(source[5] ?? source['5'] ?? 0)
+                            };
+                        }
                     }
                 }
+            },
+            openSavedScheduleEditor() {
+                if (!this.isAdmin) {
+                    this.showWarning('Solo administradores pueden editar cuadrantes guardados.');
+                    return;
+                }
+                if (!this.selectedScheduleId) {
+                    this.showWarning('Selecciona un cuadrante antes de abrir el editor.');
+                    return;
+                }
+
+                const sched = this.savedSchedules.find(s => s.id === this.selectedScheduleId);
+                if (!sched || !sched.modules) {
+                    this.showWarning('No se encontró el cuadrante seleccionado.');
+                    return;
+                }
+
+                const moduleNames = Object.keys(sched.modules || {}).sort((a, b) => a.localeCompare(b));
+                if (moduleNames.length === 0) {
+                    this.showWarning('El cuadrante seleccionado no contiene módulos para editar.');
+                    return;
+                }
+
+                this.modules = moduleNames;
+                this.schedule = {};
+                this.modules.forEach(mod => {
+                    const source = sched.modules[mod] || {};
+                    this.schedule[mod] = {
+                        1: parseInt(source[1] ?? source['1'] ?? 0),
+                        2: parseInt(source[2] ?? source['2'] ?? 0),
+                        3: parseInt(source[3] ?? source['3'] ?? 0),
+                        4: parseInt(source[4] ?? source['4'] ?? 0),
+                        5: parseInt(source[5] ?? source['5'] ?? 0)
+                    };
+                });
+
+                this.detectedCourse = sched.name || '';
+                this.uploadError = null;
+                this.step = 2;
+                this.pushActionLog('Apertura de cuadrante guardado', `Cuadrante abierto para editar: ${sched.name || this.selectedScheduleId}`);
             },
             promptDeleteSchedule() {
                 this.openModal({
