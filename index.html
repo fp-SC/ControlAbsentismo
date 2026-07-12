@@ -1113,36 +1113,69 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     width: 320
                 });
             },
-            waitForGoogleIdentityServices(timeoutMs = 5000) {
+            getGoogleIdentityScript() {
+                return document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+            },
+            waitForGoogleIdentityServices(timeoutMs = 15000) {
                 return new Promise((resolve) => {
+                    if (window.google && window.google.accounts && window.google.accounts.id) {
+                        resolve(true);
+                        return;
+                    }
+
                     const startedAt = Date.now();
+                    const scriptEl = this.getGoogleIdentityScript();
+                    let resolved = false;
+
+                    const finish = (value) => {
+                        if (resolved) return;
+                        resolved = true;
+                        if (scriptEl) {
+                            scriptEl.removeEventListener('load', checkLoaded);
+                            scriptEl.removeEventListener('error', onScriptError);
+                        }
+                        resolve(value);
+                    };
+
+                    const onScriptError = () => finish(false);
 
                     const checkLoaded = () => {
                         if (window.google && window.google.accounts && window.google.accounts.id) {
-                            resolve(true);
+                            finish(true);
                             return;
                         }
 
                         if ((Date.now() - startedAt) >= timeoutMs) {
-                            resolve(false);
+                            finish(false);
                             return;
                         }
 
                         setTimeout(checkLoaded, 100);
                     };
 
+                    if (scriptEl) {
+                        scriptEl.addEventListener('load', checkLoaded);
+                        scriptEl.addEventListener('error', onScriptError);
+                    }
+
                     checkLoaded();
                 });
+            },
+            async ensureGoogleLoginReady() {
+                const gisLoaded = await this.waitForGoogleIdentityServices();
+                if (!gisLoaded) {
+                    this.authError = 'No se pudo cargar Google Identity Services. Revisa tu conexión.';
+                    return false;
+                }
+
+                this.authError = '';
+                await this.$nextTick();
+                this.renderGoogleLoginButton();
+                return true;
             },
             async initializeInstitutionalAccess() {
                 if (!this.googleClientId || this.googleClientId.includes('PON_AQUI_TU_GOOGLE_CLIENT_ID')) {
                     this.authError = 'Configura el Google Client ID para activar el acceso institucional.';
-                    return;
-                }
-
-                const gisLoaded = await this.waitForGoogleIdentityServices();
-                if (!gisLoaded) {
-                    this.authError = 'No se pudo cargar Google Identity Services. Revisa tu conexión.';
                     return;
                 }
 
@@ -1158,8 +1191,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     localStorage.removeItem('sc_id_token');
                 }
 
-                await this.$nextTick();
-                this.renderGoogleLoginButton();
+                await this.ensureGoogleLoginReady();
             },
             logoutInstitutionalSession() {
                 this.isAuthenticated = false;
@@ -1174,9 +1206,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 if (window.google && window.google.accounts && window.google.accounts.id) {
                     window.google.accounts.id.disableAutoSelect();
                 }
-                this.$nextTick(() => {
-                    this.renderGoogleLoginButton();
-                });
+                this.ensureGoogleLoginReady();
             },
 
             formatDisplayDate(isoString) {
