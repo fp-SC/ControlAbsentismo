@@ -25,9 +25,6 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
     
     <!-- Iconos Phosphor -->
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <!-- Google Identity Services -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-
     <style>
         [v-cloak] { display: none; }
         body { 
@@ -819,6 +816,7 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 currentUserEmail: '',
                 isAuthenticated: false,
                 authError: '',
+                isLoadingAuth: false,
                 institutionalDomain: 'sagrado-corazon.es',
                 googleClientId: '523053820797-pgh6mp7hagllp1cdhul8l5j2lulb78g2.apps.googleusercontent.com',
                 accessControl: {
@@ -1114,7 +1112,43 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 });
             },
             getGoogleIdentityScript() {
-                return document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+                return document.getElementById('google-identity-services');
+            },
+            loadGoogleIdentityScript(timeoutMs = 15000) {
+                return new Promise((resolve) => {
+                    if (window.google && window.google.accounts && window.google.accounts.id) {
+                        resolve(true);
+                        return;
+                    }
+
+                    const existing = this.getGoogleIdentityScript();
+                    if (existing) {
+                        existing.remove();
+                    }
+
+                    const script = document.createElement('script');
+                    script.id = 'google-identity-services';
+                    script.src = `https://accounts.google.com/gsi/client?ts=${Date.now()}`;
+                    script.async = true;
+                    script.defer = true;
+
+                    let resolved = false;
+                    const timer = setTimeout(() => finish(false), timeoutMs);
+
+                    const finish = (value) => {
+                        if (resolved) return;
+                        resolved = true;
+                        clearTimeout(timer);
+                        script.onload = null;
+                        script.onerror = null;
+                        resolve(value);
+                    };
+
+                    script.onload = () => finish(!!(window.google && window.google.accounts && window.google.accounts.id));
+                    script.onerror = () => finish(false);
+
+                    document.head.appendChild(script);
+                });
             },
             waitForGoogleIdentityServices(timeoutMs = 15000) {
                 return new Promise((resolve) => {
@@ -1124,20 +1158,13 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     }
 
                     const startedAt = Date.now();
-                    const scriptEl = this.getGoogleIdentityScript();
                     let resolved = false;
 
                     const finish = (value) => {
                         if (resolved) return;
                         resolved = true;
-                        if (scriptEl) {
-                            scriptEl.removeEventListener('load', checkLoaded);
-                            scriptEl.removeEventListener('error', onScriptError);
-                        }
                         resolve(value);
                     };
-
-                    const onScriptError = () => finish(false);
 
                     const checkLoaded = () => {
                         if (window.google && window.google.accounts && window.google.accounts.id) {
@@ -1153,16 +1180,22 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                         setTimeout(checkLoaded, 100);
                     };
 
-                    if (scriptEl) {
-                        scriptEl.addEventListener('load', checkLoaded);
-                        scriptEl.addEventListener('error', onScriptError);
-                    }
-
                     checkLoaded();
                 });
             },
             async ensureGoogleLoginReady() {
-                const gisLoaded = await this.waitForGoogleIdentityServices();
+                this.isLoadingAuth = true;
+                this.authError = '';
+
+                let gisLoaded = await this.waitForGoogleIdentityServices(1200);
+                if (!gisLoaded) {
+                    gisLoaded = await this.loadGoogleIdentityScript();
+                }
+                if (!gisLoaded) {
+                    gisLoaded = await this.waitForGoogleIdentityServices(3000);
+                }
+
+                this.isLoadingAuth = false;
                 if (!gisLoaded) {
                     this.authError = 'No se pudo cargar Google Identity Services. Revisa tu conexión.';
                     return false;
