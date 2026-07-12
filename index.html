@@ -1113,13 +1113,35 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                     width: 320
                 });
             },
+            waitForGoogleIdentityServices(timeoutMs = 5000) {
+                return new Promise((resolve) => {
+                    const startedAt = Date.now();
+
+                    const checkLoaded = () => {
+                        if (window.google && window.google.accounts && window.google.accounts.id) {
+                            resolve(true);
+                            return;
+                        }
+
+                        if ((Date.now() - startedAt) >= timeoutMs) {
+                            resolve(false);
+                            return;
+                        }
+
+                        setTimeout(checkLoaded, 100);
+                    };
+
+                    checkLoaded();
+                });
+            },
             async initializeInstitutionalAccess() {
                 if (!this.googleClientId || this.googleClientId.includes('PON_AQUI_TU_GOOGLE_CLIENT_ID')) {
                     this.authError = 'Configura el Google Client ID para activar el acceso institucional.';
                     return;
                 }
 
-                if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+                const gisLoaded = await this.waitForGoogleIdentityServices();
+                if (!gisLoaded) {
                     this.authError = 'No se pudo cargar Google Identity Services. Revisa tu conexión.';
                     return;
                 }
@@ -1152,7 +1174,9 @@ Implementación de seguridad con acceso restringido solo para cuentas institucio
                 if (window.google && window.google.accounts && window.google.accounts.id) {
                     window.google.accounts.id.disableAutoSelect();
                 }
-                this.renderGoogleLoginButton();
+                this.$nextTick(() => {
+                    this.renderGoogleLoginButton();
+                });
             },
 
             formatDisplayDate(isoString) {
